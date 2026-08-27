@@ -1,0 +1,32 @@
+{
+  "name": "artai-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build -w packages/artai && npm run build -w apps/studio",
+    "dev": "node scripts/dev.mjs",
+    "dev:studio": "npm run dev -w apps/studio",
+    "test": "npm run test -w packages/artai && node --test \"apps/pi-bridge/*.test.mjs\"",
+    "typecheck": "tsc --noEmit -p packages/artai && tsc --noEmit -p apps/studio",
+    "bridge": "node apps/pi-bridge/server.mjs",
+    "demo": "node packages/artai/bin/artai.mjs make \"一只麋鹿与花草错过的夏天\" --seed 42"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.3",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "esbuild": "^0.28.2",
+    "playwright-chromium": "^1.62.1",
+    "svelte": "^5.56.10",
+    "typescript": "~7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11",
+    "zod": "^4.4.3"
+  }
+}

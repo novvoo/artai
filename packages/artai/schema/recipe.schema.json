@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "generate",
+        "photo-input",
+        "reference-informed"
+      ]
+    },
+    "canvas": {
+      "type": "object",
+      "properties": {
+        "ratio": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          ]
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 240,
+          "maximum": 4096
+        },
+        "paperTone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ratio",
+        "width",
+        "paperTone"
+      ],
+      "additionalProperties": false
+    },
+    "attention": {
+      "type": "object",
+      "properties": {
+        "negativeSpace": {
+          "type": "number",
+          "minimum": 0.35,
+          "maximum": 0.8
+        },
+        "clusterScale": {
+          "type": "number",
+          "minimum": 0.08,
+          "maximum": 0.52
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "center-high",
+            "center-low",
+            "left-middle",
+            "right-middle",
+            "lower-left-third",
+            "upper-right-third",
+            "offset-center"
+          ]
+        }
+      },
+      "required": [
+        "negativeSpace",
+        "clusterScale",
+        "position"
+      ],
+      "additionalProperties": false
+    },
+    "metaphor": {
+      "type": "object",
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relation": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "subject",
+        "relation"
+      ],
+      "additionalProperties": false
+    },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "family": {
+          "type": "string",
+          "enum": [
+            "center-fragment",
+            "lower-left-float",
+            "upper-right-block",
+            "dual-panel",
+            "irregular-cutout",
+            "type-led",
+            "dot-orbit",
+            "single-specimen",
+            "diagonal-notes",
+            "edge-counterweight"
+          ]
+        }
+      },
+      "required": [
+        "family"
+      ],
+      "additionalProperties": false
+    },
+    "focal": {
+      "type": "object",
+      "properties": {
+        "form": {
+          "type": "string",
+          "enum": [
+            "faded-photo",
+            "photo-crop",
+            "torn-clipping",
+            "flat-silhouette",
+            "color-block",
+            "printed-illustration",
+            "specimen",
+            "translucent-overlay",
+            "texture-window",
+            "fragmented-type"
+          ]
+        },
+        "treatment": {
+          "type": "string",
+          "enum": [
+            "xerox-softness",
+            "risograph-grain",
+            "letterpress-bleed",
+            "halftone-degradation",
+            "film-grain",
+            "scan-noise",
+            "paper-mottling",
+            "misregistration",
+            "motion-blur-text"
+          ]
+        }
+      },
+      "required": [
+        "form",
+        "treatment"
+      ],
+      "additionalProperties": false
+    },
+    "type": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "floating-letters",
+            "edge-pressed-phrase",
+            "archive-microtext",
+            "diagonal-scattered",
+            "ghost-text",
+            "headline-object",
+            "text-in-block",
+            "almost-textless"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "family": {
+          "default": "typewriter",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode",
+        "family"
+      ],
+      "additionalProperties": false
+    },
+    "color": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "hue": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "carrier": {
+          "type": "string",
+          "enum": [
+            "subject",
+            "cutout",
+            "block",
+            "photo-region",
+            "bold-type",
+            "dot",
+            "hairline"
+          ]
+        },
+        "canvasShare": {
+          "type": "number",
+          "minimum": 0.004,
+          "maximum": 0.04
+        }
+      },
+      "required": [
+        "name",
+        "hue",
+        "carrier",
+        "canvasShare"
+      ],
+      "additionalProperties": false
+    },
+    "texture": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "xerox-softness",
+            "risograph-grain",
+            "letterpress-bleed",
+            "halftone-degradation",
+            "film-grain",
+            "scan-noise",
+            "paper-mottling",
+            "misregistration",
+            "motion-blur-text"
+          ]
+        },
+        "misregistration": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "marks": {
+      "maxItems": 3,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "dot-group",
+          "annotation-line",
+          "tiny-arrow",
+          "dashed-line",
+          "transparent-rect",
+          "registration-mark",
+          "hand-curve"
+        ]
+      }
+    },
+    "detail": {
+      "default": 2,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 6
+    },
+    "mood": {
+      "type": "string",
+      "enum": [
+        "quiet",
+        "summer",
+        "solitude",
+        "childhood",
+        "seaside",
+        "afternoon",
+        "night",
+        "memory",
+        "surreal"
+      ]
+    },
+    "photo": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "edit-target",
+            "reference-image",
+            "supporting-insert"
+          ]
+        },
+        "preservation": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "invariants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "role",
+        "preservation",
+        "invariants"
+      ],
+      "additionalProperties": false
+    },
+    "visual": {
+      "type": "object",
+      "properties": {
+        "motifId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "intentSource": {
+          "default": "heuristic",
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "intentSource"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "seed",
+    "mode",
+    "canvas",
+    "attention",
+    "metaphor",
+    "layout",
+    "focal",
+    "type",
+    "color",
+    "texture",
+    "marks",
+    "detail",
+    "mood",
+    "provenance"
+  ],
+  "additionalProperties": false
+}

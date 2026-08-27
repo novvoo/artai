@@ -1,0 +1,51 @@
+{
+  "name": "artai",
+  "version": "0.1.0",
+  "description": "Deterministic minimal-zine poster engine — recipe → layout → scene IR → prompt/render backends",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/types/core/index.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./agent": {
+      "types": "./dist/types/agent/index.d.ts",
+      "import": "./dist/agent.js"
+    },
+    "./render": {
+      "types": "./dist/types/render/index.d.ts",
+      "import": "./dist/render.js"
+    },
+    "./schema.json": "./schema/recipe.schema.json"
+  },
+  "bin": {
+    "artai": "./bin/artai.mjs"
+  },
+  "files": [
+    "dist",
+    "schema"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node scripts/build-lib.mjs && node scripts/gen-schema.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "p5.brush": "^2.2.2"
+  },
+  "peerDependenciesMeta": {
+    "p5.brush": {
+      "optional": true
+    }
+  }
+}
