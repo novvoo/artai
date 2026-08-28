@@ -73,6 +73,8 @@ interface AttemptOpts {
   readonly useRF: boolean;
   readonly prefill: boolean;
   readonly system: string;
+  /** abort signal — forwarded to fetch so 停止 kills the in-flight request */
+  readonly signal?: AbortSignal;
   /** when provided, the request switches to SSE streaming and this callback
    * receives text deltas as they arrive (used by composeGraph for live preview) */
   readonly onDelta?: ((chunk: string) => void) | undefined;
@@ -195,6 +197,7 @@ export class BrowserIntentProvider implements IntentProvider {
         try {
           res = await this.guardedFetch(`${bases[i]}/messages`, {
             method: "POST",
+            ...(o.signal ? { signal: o.signal } : {}),
             headers: {
               "content-type": "application/json",
               // pass BOTH x-api-key AND Authorization so Anthropic-native and
@@ -305,6 +308,7 @@ export class BrowserIntentProvider implements IntentProvider {
     }
     const res = await this.guardedFetch(`${this.cfg.baseUrl}/chat/completions`, {
       method: "POST",
+      ...(o.signal ? { signal: o.signal } : {}),
       headers: { "content-type": "application/json",
                  authorization: `Bearer ${this.cfg.apiKey}` },
       body: JSON.stringify({
@@ -648,6 +652,8 @@ export class BrowserIntentProvider implements IntentProvider {
     /** optional live progress callback — fires per pipeline step so the
      * studio can show 构图初稿 / 打磨 round N as they happen */
     onStatus?: (label: string) => void;
+    /** abort signal — aborted fetches die mid-flight and the loop unwinds */
+    signal?: AbortSignal;
     /** seed the FIRST attempt as a revision of an existing graph (the
      * studio's 继续打磨 button): complaints empty ⇒ a generic elevation
      * brief is used instead */
@@ -707,6 +713,8 @@ export class BrowserIntentProvider implements IntentProvider {
     } | null = null;
 
     for (let rung = 0; rung < MAX_ATTEMPTS; rung++) {
+      if (input.signal?.aborted)
+        throw new DOMException("stopped by user", "AbortError");
       // revision attempts ALWAYS use the JSONL rung in PATCH mode: the model
       // re-emits only the layers it changes (~1k tokens) instead of the whole
       // graph (~6k+) — a full regen per polish round was why revisions were
@@ -755,6 +763,7 @@ export class BrowserIntentProvider implements IntentProvider {
         rr = await this.raw(attemptUser, {
           system: r.system,
           maxTokens: r.budget,
+          ...(input.signal ? { signal: input.signal } : {}),
           // response_format/assistant-prefill both force ONE top-level JSON
           // value — they must be OFF in JSONL mode or the format collapses
           useRF: !this.anthropic() && !r.jsonl,
@@ -766,6 +775,8 @@ export class BrowserIntentProvider implements IntentProvider {
           ...(input.onDelta ? { onDelta: input.onDelta } : {}),
         });
       } catch (e) {
+        if (input.signal?.aborted)
+          throw new DOMException("stopped by user", "AbortError");
         lastErr = String((e as Error).message ?? e).slice(0, 140);
         // the next attempt burns real budget, so give a hiccuping endpoint
         // (rate limit, dropped connection) a beat before escalating
@@ -778,6 +789,8 @@ export class BrowserIntentProvider implements IntentProvider {
         preview = `<empty> ${diag}`;
         continue;
       }
+      if (input.signal?.aborted)
+        throw new DOMException("stopped by user", "AbortError");
       truncatedLastRun = /length|max.?token/i.test(rr.finish ?? "");
       diag = `finish=${rr.finish ?? "?"}${rr.usageNote ? ` ${rr.usageNote}` : ""}`;
       preview = rr.text.replace(/\s+/g," ").slice(0,140);

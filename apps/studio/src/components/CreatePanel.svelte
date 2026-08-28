@@ -77,11 +77,19 @@
     {/if}
   </div>
 
-  <button class="generate" onclick={() => engine.generate()} disabled={engine.busy}>
-    {engine.busy
-      ? `… ${engine.stageLabelZh} · ${engine.elapsedSec}s`
-      : "GENERATE"}
-  </button>
+  <div class="gen-row">
+    <button class="generate" onclick={() => engine.generate()} disabled={engine.busy}>
+      {engine.busy
+        ? `… ${engine.stageLabelZh} · ${engine.elapsedSec}s`
+        : "GENERATE"}
+    </button>
+    {#if engine.busy}
+      <button class="stop" onclick={() => engine.stopRun()} disabled={engine.stopping}
+        title="中断当前生成（已完成的阶段结果会保留）">
+        {engine.stopping ? "停止中…" : "■ 停止"}
+      </button>
+    {/if}
+  </div>
 </section>
 
 <style>
@@ -132,6 +140,19 @@
     padding: 6px 8px;
     color: var(--ink-soft);
   }
+  .gen-row { display: flex; gap: 8px; }
+  .gen-row .generate { flex: 1; }
+  .stop {
+    border: 1px solid rgba(163, 60, 29, 0.55);
+    background: rgba(163, 60, 29, 0.08);
+    color: #8a1f12;
+    padding: 0 16px;
+    cursor: pointer;
+    letter-spacing: 0.08em;
+    font-size: 12px;
+  }
+  .stop:hover:not(:disabled) { background: rgba(163, 60, 29, 0.16); }
+  .stop:disabled { opacity: 0.5; cursor: default; }
   .generate {
     margin-top: 4px;
     padding: 12px;

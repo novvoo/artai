@@ -148,6 +148,9 @@ class Engine {
   polishRound = $state(0);
   /** real-time activity log — one line per pipeline event, shown live in the UI */
   log = $state<string[]>([]);
+  /** true after the user pressed 停止 and the run is unwinding */
+  stopping = $state(false);
+  private runCtrl: AbortController | null = null;
   /** floating windows: activity log + full-size poster lightbox */
   logOpen = $state(false);
   lightbox = $state<string | null>(null);
@@ -165,6 +168,20 @@ class Engine {
   private lastTheme = "";
   private timer: ReturnType<typeof setInterval> | null = null;
 
+  /** abort the in-flight run: fetches die mid-flight, checkpoints unwind */
+  stopRun(): void {
+    if (!this.busy || this.stopping) return;
+    this.stopping = true;
+    this.runCtrl?.abort();
+    this.pushLog("■ 收到停止请求，正在中断当前阶段…");
+  }
+
+  /** checkpoint between async stages — throws when the run was stopped */
+  private chk(): void {
+    if (this.runCtrl?.signal.aborted)
+      throw new DOMException("stopped by user", "AbortError");
+  }
+
   /** append one timestamped line to the live activity log */
   pushLog(msg: string): void {
     const t = new Date();
@@ -175,7 +192,7 @@ class Engine {
   /** LLM-authored composition graph, cached under the cache toggle */
   private async composeGraphCached(
     env: any, fullSpec: string, onDelta?: (chunk: string) => void,
-    onStatus?: (label: string) => void,
+    onStatus?: (label: string) => void, signal?: AbortSignal,
   ) {
     const key = "graph." + await genHash(this.theme.trim(), "graph:v1");
     if (useCache.on) {
@@ -193,6 +210,7 @@ class Engine {
       theme: this.theme.trim(),
       ...(onDelta ? { onDelta } : {}),
       ...(onStatus ? { onStatus } : {}),
+      ...(signal ? { signal } : {}),
     });
     if (useCache.on) cacheSet(key, graph);
     return graph;
@@ -205,9 +223,12 @@ class Engine {
     const t = this.theme.trim();
     if (t !== this.lastTheme) { this.salt = 0; this.lastTheme = t; }
 
-    this.busy = true; this.error = ""; this.pngUrl = null;
+    this.busy = true; this.stopping = false; this.error = ""; this.pngUrl = null;
     this.graph = null; this.graphScript = null;
     this.graphStreamText = ""; this.graphLiveBase = null; this.graphFailed = "";
+    const runCtrl = new AbortController();
+    this.runCtrl = runCtrl;
+    const signal = runCtrl.signal;
     this.stageIndex = 0; this.stageLabelZh = "\u89e3\u8bfb\u4e3b\u9898...";
     this.log = [];
     this.logOpen = true;
@@ -233,6 +254,7 @@ class Engine {
         draft = await bpInstance().parse({ theme: t });
         if (useCache.on) cacheSet("intent." + draftKey, draft);
       }
+      this.chk();
       this.pushLog(`\u2713 \u4e3b\u9898\u89e3\u8bfb\uff1a\u201c${draft.thesis}\u201d \u00b7 mood=${draft.mood} \u00b7 motif=${draft.motifHint ?? "-"} \u00b7 lang=${draft.lang}`);
       artai.setDefaultProvider(bpInstance());
 
@@ -242,6 +264,7 @@ class Engine {
         backend: this.backend === "render" ? "render" : "prompt",
       });
       this.pushLog(`\u2713 \u914d\u65b9\u5c31\u7eea\uff1alayout=${env.recipe.layout.family} \u00b7 focal=${env.recipe.focal.form} \u00b7 hue=${env.recipe.color.hue} \u00b7 \u95e8\u7981 ${env.gate.pass ? "pass" : "degraded"}`);
+      this.chk();
 
       document.documentElement.style.setProperty("--accent",
         String(env.recipe.color.hue));
@@ -287,11 +310,13 @@ class Engine {
               this.stageLabelZh = label;
               this.pushLog(label);
             },
+            signal,
           );
           this.graphStreamText = "";   // switch preview to the finished graph
           this.graphLiveBase = null;
           this.graph = graph;
           this.pushLog(`✓ 构图完成：${graph.layers.length} 层 · ${graph.layers.reduce((a: number, l: any) => a + (l.shapes?.length ?? 0), 0)} shapes · lightDeg=${graph.lightDeg}`);
+          this.chk();
 
           // the enhanced code IS the graph + its deterministic renderer
           const seedUsed = Number(env.meta?.seedUsed ?? seed);
@@ -329,6 +354,7 @@ class Engine {
       }
 
       this.pushLog("④ 渲染海报 PNG…");
+      this.chk();
 
       if (this.backend === "render" && !this.graph) {
         // only the graph-failure fallback still renders here; the success
@@ -340,10 +366,15 @@ class Engine {
         this.renderWarnings = r.warnings || [];
       }
     } catch (err) {
-      this.error = fmtErr(err).slice(0, 480);
-      this.pushLog(`✗ ${this.error}`);
-      this.pngUrl = null;
-    } finally {
+      if (signal.aborted) {
+        // user stop — not an error: keep whatever already rendered visible
+        this.pushLog("■ 已停止");
+        this.stageLabelZh = "已停止";
+      } else {
+        this.error = fmtErr(err).slice(0, 480);
+        this.pushLog(`✗ ${this.error}`);
+        this.pngUrl = null;
+      }
       clearInterval(this.timer!); this.timer = null; this.busy = false;
       if (!this.error) {
         this.stageIndex = 6; this.stageLabelZh = "done";
@@ -359,9 +390,13 @@ class Engine {
     if (this.busy || this.polishing || !this.graph || !this.envelope) return;
     const env = this.envelope;
     this.busy = true;
+    this.stopping = false;
     this.polishing = true;
     this.polishRound = 0;
     this.error = "";
+    const runCtrl = new AbortController();
+    this.runCtrl = runCtrl;
+    const signal = runCtrl.signal;
     this.graphStreamText = "";
     this.graphLiveBase = {
       width: env.ir.canvas.width,
@@ -396,6 +431,7 @@ class Engine {
           this.stageLabelZh = label;
           this.pushLog(label);
         },
+        signal,
       });
       this.graphStreamText = "";
       this.graphLiveBase = null;
@@ -417,6 +453,7 @@ class Engine {
       this.pngUrl = r.dataUrl;
       this.rendererName = r.renderer;
       this.renderWarnings = r.warnings || [];
+      this.chk();
       this.pushLog(`✓ 打磨完成：${graph.layers.length} 层 · ${graph.layers.reduce((a: number, l: any) => a + (l.shapes?.length ?? 0), 0)} shapes · 海报已更新`);
       // keep the composition cache coherent with the improved version
       if (useCache.on) {
@@ -424,11 +461,17 @@ class Engine {
         cacheSet(key, graph);
       }
     } catch (err) {
-      this.error = fmtErr(err).slice(0, 480);
-      this.pushLog(`✗ 打磨失败：${this.error}`);
+      if (signal.aborted) {
+        this.pushLog("■ 已停止（保留上一版海报）");
+      } else {
+        this.error = fmtErr(err).slice(0, 480);
+        this.pushLog(`✗ 打磨失败：${this.error}`);
+      }
     } finally {
       this.busy = false;
+      this.stopping = false;
       this.polishing = false;
+      this.runCtrl = null;
       this.stageIndex = 6;
       this.stageLabelZh = "done";
     }
