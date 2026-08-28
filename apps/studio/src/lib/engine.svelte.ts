@@ -146,6 +146,12 @@ class Engine {
   /** 继续打磨 state: true while a polish round runs, count of finished rounds */
   polishing = $state(false);
   polishRound = $state(0);
+  /** real-time activity log — one line per pipeline event, shown live in the UI */
+  log = $state<string[]>([]);
+  /** floating windows: activity log + full-size poster lightbox */
+  logOpen = $state(false);
+  lightbox = $state<string | null>(null);
+  lightboxOpen = $state(false);
   rendererName = $state("");
   renderWarnings = $state<string[]>([]);
   webgl2 = $state(true);
@@ -159,6 +165,13 @@ class Engine {
   private lastTheme = "";
   private timer: ReturnType<typeof setInterval> | null = null;
 
+  /** append one timestamped line to the live activity log */
+  pushLog(msg: string): void {
+    const t = new Date();
+    const stamp = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")}`;
+    this.log = [...this.log.slice(-199), `[${stamp}] ${msg}`];
+  }
+
   /** LLM-authored composition graph, cached under the cache toggle */
   private async composeGraphCached(
     env: any, fullSpec: string, onDelta?: (chunk: string) => void,
@@ -169,7 +182,10 @@ class Engine {
       const hit = cacheGet<any>(key);
       // floor 6 matches composeGraph's lenient acceptance so polished
       // salvaged versions (6–7 layers) still round-trip through the cache
-      if (hit && Array.isArray(hit.layers) && hit.layers.length >= 6) return hit;
+      if (hit && Array.isArray(hit.layers) && hit.layers.length >= 6) {
+        this.pushLog(`③ 构图命中缓存（${hit.layers.length} 层）`);
+        return hit;
+      }
     }
     const graph = await bpInstance().composeGraph({
       fullSpec,
@@ -193,6 +209,9 @@ class Engine {
     this.graph = null; this.graphScript = null;
     this.graphStreamText = ""; this.graphLiveBase = null; this.graphFailed = "";
     this.stageIndex = 0; this.stageLabelZh = "\u89e3\u8bfb\u4e3b\u9898...";
+    this.log = [];
+    this.logOpen = true;
+    this.pushLog(`\u25b6 GENERATE \u300c${t}\u300d backend=${this.backend}`);
     const t0 = Date.now();
     this.timer && clearInterval(this.timer);
     this.timer = setInterval(() => {
@@ -208,16 +227,21 @@ class Engine {
       const intentHit = useCache.on ? cacheGet<IntentDraft>("intent." + draftKey) : null;
       if (intentHit) {
         draft = intentHit;
+        this.pushLog("\u2460 \u4e3b\u9898\u89e3\u8bfb\u547d\u4e2d\u7f13\u5b58");
       } else {
+        this.pushLog("\u2460 \u89e3\u8bfb\u4e3b\u9898\u2026\uff08LLM \u8c03\u7528\uff0c\u53ef\u80fd\u591a\u8f6e\uff09");
         draft = await bpInstance().parse({ theme: t });
         if (useCache.on) cacheSet("intent." + draftKey, draft);
       }
+      this.pushLog(`\u2713 \u4e3b\u9898\u89e3\u8bfb\uff1a\u201c${draft.thesis}\u201d \u00b7 mood=${draft.mood} \u00b7 motif=${draft.motifHint ?? "-"} \u00b7 lang=${draft.lang}`);
       artai.setDefaultProvider(bpInstance());
 
+      this.pushLog("\u2461 \u914d\u65b9\u00b7\u7248\u5f0f\u00b7\u95e8\u7981\uff08\u672c\u5730\u786e\u5b9a\u6027\u7ba1\u7ebf\uff09\u2026");
       env = await artai.realize(draft, {
         seed,
         backend: this.backend === "render" ? "render" : "prompt",
       });
+      this.pushLog(`\u2713 \u914d\u65b9\u5c31\u7eea\uff1alayout=${env.recipe.layout.family} \u00b7 focal=${env.recipe.focal.form} \u00b7 hue=${env.recipe.color.hue} \u00b7 \u95e8\u7981 ${env.gate.pass ? "pass" : "degraded"}`);
 
       document.documentElement.style.setProperty("--accent",
         String(env.recipe.color.hue));
@@ -246,6 +270,7 @@ class Engine {
           // Streaming: deltas land in graphStreamText; ResultSheet redraws
           // the canvas live as each layer's JSON object completes.
           this.stageLabelZh = "构图…";
+          this.pushLog("③ LLM 构图（初稿 → 审计 → 打磨）…");
           this.graphStreamText = "";
           this.graphLiveBase = {
             width: env.ir.canvas.width,
@@ -260,11 +285,13 @@ class Engine {
               // each polish round is a fresh draft — clear the stale stream
               this.graphStreamText = "";
               this.stageLabelZh = label;
+              this.pushLog(label);
             },
           );
           this.graphStreamText = "";   // switch preview to the finished graph
           this.graphLiveBase = null;
           this.graph = graph;
+          this.pushLog(`✓ 构图完成：${graph.layers.length} 层 · ${graph.layers.reduce((a: number, l: any) => a + (l.shapes?.length ?? 0), 0)} shapes · lightDeg=${graph.lightDeg}`);
 
           // the enhanced code IS the graph + its deterministic renderer
           const seedUsed = Number(env.meta?.seedUsed ?? seed);
@@ -296,9 +323,12 @@ class Engine {
           this.graphStreamText = "";
           this.graphLiveBase = null;
           this.graphFailed = fmtErr(e).slice(0, 300);
+          this.pushLog(`✗ 构图失败，已回退 RAW 基线：${this.graphFailed}`);
           this.renderCode = this.renderCodeBaseline;
         }
       }
+
+      this.pushLog("④ 渲染海报 PNG…");
 
       if (this.backend === "render" && !this.graph) {
         // only the graph-failure fallback still renders here; the success
@@ -311,11 +341,13 @@ class Engine {
       }
     } catch (err) {
       this.error = fmtErr(err).slice(0, 480);
+      this.pushLog(`✗ ${this.error}`);
       this.pngUrl = null;
     } finally {
       clearInterval(this.timer!); this.timer = null; this.busy = false;
       if (!this.error) {
         this.stageIndex = 6; this.stageLabelZh = "done";
+        this.pushLog(`✓ 完成，耗时 ${Math.round((Date.now() - t0) / 100) / 10}s`);
       }
     }
   }
@@ -343,6 +375,9 @@ class Engine {
       const { critiqueGraph, graphToScript } =
         await import("artai/core");
       const seedUsed = Number(env.meta?.seedUsed ?? 1);
+      const complaints = critiqueGraph(this.graph as any);
+      this.logOpen = true;
+      this.pushLog(`▶ 继续打磨 · 审计当前终稿：${complaints.length ? `${complaints.length} 项问题 — ${complaints.join("; ")}` : "无硬伤，执行提升级打磨"}`);
       const graph = await bpInstance().composeGraph({
         fullSpec: String(this.fullSpec ?? ""),
         paletteHexes: paletteOf(env),
@@ -351,7 +386,7 @@ class Engine {
           graphJson: JSON.stringify({
             lightDeg: this.graph.lightDeg, layers: this.graph.layers,
           }),
-          complaints: critiqueGraph(this.graph as any),
+          complaints,
         },
         onDelta: (chunk) => { this.graphStreamText += chunk; },
         onStatus: (label) => {
@@ -359,6 +394,7 @@ class Engine {
           this.graphStreamText = "";
           this.polishRound++;
           this.stageLabelZh = label;
+          this.pushLog(label);
         },
       });
       this.graphStreamText = "";
@@ -381,6 +417,7 @@ class Engine {
       this.pngUrl = r.dataUrl;
       this.rendererName = r.renderer;
       this.renderWarnings = r.warnings || [];
+      this.pushLog(`✓ 打磨完成：${graph.layers.length} 层 · ${graph.layers.reduce((a: number, l: any) => a + (l.shapes?.length ?? 0), 0)} shapes · 海报已更新`);
       // keep the composition cache coherent with the improved version
       if (useCache.on) {
         const key = "graph." + await genHash(this.theme.trim(), "graph:v1");
@@ -388,6 +425,7 @@ class Engine {
       }
     } catch (err) {
       this.error = fmtErr(err).slice(0, 480);
+      this.pushLog(`✗ 打磨失败：${this.error}`);
     } finally {
       this.busy = false;
       this.polishing = false;

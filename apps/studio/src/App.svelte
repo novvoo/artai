@@ -3,14 +3,23 @@
   import CreatePanel from "./components/CreatePanel.svelte";
   import ResultSheet from "./components/ResultSheet.svelte";
   import SettingsDrawer from "./components/SettingsDrawer.svelte";
+  import FloatingWindow from "./components/FloatingWindow.svelte";
+  import StatusCapsule from "./components/StatusCapsule.svelte";
 
   let showSettings = $state(false);
+  let logBox: HTMLDivElement | null = $state(null);
   const status = $derived(transportStatus());
   const statusLabel = $derived(
     status === "pi-bridge" ? "● pi-bridge"
     : status === "browser-key" ? "● browser-key"
     : "● offline",
   );
+
+  // keep the newest activity line in view
+  $effect(() => {
+    void engine.log.length;
+    if (logBox) logBox.scrollTop = logBox.scrollHeight;
+  });
 </script>
 
 <div class="frame">
@@ -46,6 +55,28 @@
     {#if engine.error}
       <footer class="error">✗ {engine.error}</footer>
     {/if}
+  {/if}
+
+  <!-- floating capsule: always-on pipeline status, click toggles the log -->
+  <StatusCapsule />
+
+  {#if engine.logOpen}
+    <FloatingWindow title="实时进展" bind:open={engine.logOpen} width={470} anchor="right">
+      <div class="log" bind:this={logBox}>
+        {#each engine.log as line}
+          <div>{line}</div>
+        {/each}
+      </div>
+    </FloatingWindow>
+  {/if}
+
+  {#if engine.lightbox}
+    <FloatingWindow title="海报 · 全尺寸预览" bind:open={engine.lightboxOpen} width={680} anchor="center">
+      <img class="lightbox-img" src={engine.lightbox} alt="generated zine poster full size" />
+      <div class="lightbox-actions">
+        <a class="lb-btn" href={engine.lightbox} download={`artai-poster-${engine.baseSeed}.png`}>download PNG</a>
+      </div>
+    </FloatingWindow>
   {/if}
 </div>
 
@@ -111,4 +142,33 @@
     font-family: var(--mono);
     font-size: 12px;
   }
+  .log {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--ink-soft, #6b675e);
+    white-space: pre-wrap;
+  }
+  .lightbox-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 6px;
+    border: 1px solid rgba(26, 26, 26, 0.12);
+  }
+  .lightbox-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .lb-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink, #26241f);
+    text-decoration: none;
+    border: 1px solid var(--hairline, rgba(26,26,26,.2));
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+  .lb-btn:hover { border-color: var(--accent, #d8412f); }
 </style>

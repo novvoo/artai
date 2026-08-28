@@ -22,10 +22,48 @@
      layers with per-layer captions. Both phases run through
      drawGraphToCtx — the same engine the exported script executes. */
   let liveCanvas: HTMLCanvasElement | null = $state(null);
+  /** poster-area live canvas — shows the streaming draft in place of the
+   * static PNG while a composition (first run or 继续打磨) is in flight */
+  let posterLiveCanvas: HTMLCanvasElement | null = $state(null);
   let revealN = $state(0);
   let playing = $state(false);
   let replayTick = $state(0);
   let drawnLiveN = -1;
+
+  /* ── preview video export (ffmpeg.wasm) ── */
+  let exportingVideo = $state(false);
+  let videoStage = $state("");
+
+  async function downloadPreviewVideo(): Promise<void> {
+    if (!engine.graph || exportingVideo) return;
+    const env = engine.envelope;
+    if (!env) return;
+    exportingVideo = true;
+    videoStage = "准备…";
+    try {
+      const { exportPreviewVideo } = await import("../lib/previewVideo.js");
+      const blob = await exportPreviewVideo({
+        graph: engine.graph,
+        width: env.ir.canvas.width,
+        height: env.ir.canvas.height,
+        seed: Number(env.meta?.seedUsed ?? 1),
+        paletteHexes: engine.graph.paletteLocked ?? [],
+        onProgress: (stage, pct) => {
+          videoStage = `${stage} ${Math.round(pct * 100)}%`;
+        },
+      });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `artai-preview-${engine.baseSeed}.mp4`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) {
+      engine.error = `预览视频导出失败：${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      exportingVideo = false;
+      videoStage = "";
+    }
+  }
 
   const sortedLayers = $derived.by(() => {
     const g = engine.graph;
@@ -45,8 +83,8 @@
     return scanPartialGraph(engine.graphStreamText);
   });
 
-  function paint(layers: unknown[], lightDeg: number | null): void {
-    const c = liveCanvas;
+  function paint(target: HTMLCanvasElement | null, layers: unknown[], lightDeg: number | null): void {
+    const c = target;
     const base = engine.graphLiveBase ?? {
       width: Number(engine.envelope?.ir?.canvas?.width ?? 1200),
       height: Number(engine.envelope?.ir?.canvas?.height ?? 2000),
@@ -74,21 +112,26 @@
         return;
       }
       revealN++;
-      paint(sortedLayers.slice(0, revealN), engine.graph?.lightDeg ?? null);
+      paint(liveCanvas, sortedLayers.slice(0, revealN), engine.graph?.lightDeg ?? null);
       setTimeout(step, perLayer);
     };
     setTimeout(step, 80);
   }
 
-  // phase 1 — while streaming, repaint whenever a new layer object completes
+  // phase 1 — while streaming, repaint whenever a new layer object completes;
+  // during 继续打磨 the poster area mirrors the live draft so the user sees
+  // the image changing in real time instead of waiting for the round to end
   $effect(() => {
     const p = livePartial;
     if (!p) { drawnLiveN = -1; return; }
     if (p.layers.length !== drawnLiveN) {
       drawnLiveN = p.layers.length;
-      paint(p.layers as unknown[], p.lightDeg);
+      paint(liveCanvas, p.layers as unknown[], p.lightDeg);
+      paint(posterLiveCanvas, p.layers as unknown[], p.lightDeg);
     }
   });
+
+
 
   // phase 2 — replay whenever a new graph lands (or the user hits 重播)
   $effect(() => {
@@ -102,17 +145,31 @@
     <p class="empty">生成结果将出现在这里 — 输入主题，按下 GENERATE。</p>
   {:else}
     {@const env = engine.envelope}
-    <!-- poster image -->
-    {#if engine.pngUrl}
+    <!-- poster image / live draft -->
+    {#if livePartial}
       <figure class="poster-mat">
-        <img src={engine.pngUrl} alt="generated zine poster"
-          width={Math.round(env.ir.canvas.width / 2.4)}
-          height={Math.round(env.ir.canvas.height / 2.4)} />
+        <canvas bind:this={posterLiveCanvas}
+          style:width={`${Math.round(env.ir.canvas.width / 2.4)}px`}></canvas>
+        <figcaption class="mono">
+          ✦ 实时构图{engine.polishing ? "（打磨中）" : ""} — 已落层 {livePartial.layers.length}
+        </figcaption>
+      </figure>
+    {:else if engine.pngUrl}
+      <figure class="poster-mat">
+        <button class="poster-zoom" onclick={() => { engine.lightbox = engine.pngUrl; engine.lightboxOpen = true; }}
+          title="点击查看全尺寸">
+          <img src={engine.pngUrl} alt="generated zine poster"
+            style:max-height="62vh" style:width="auto" />
+        </button>
         <figcaption class="mono">
           {env.ir.canvas.width}×{env.ir.canvas.height}px · renderer:{engine.rendererName}
           {engine.renderWarnings.length ? ` · ${engine.renderWarnings.length} warnings` : ""}
           {engine.polishRound > 0 ? ` · ✦ 已打磨 ${engine.polishRound} 轮` : ""}
           <button onclick={() => engine.pngUrl && downloadPng(engine.pngUrl)}>download PNG</button>
+          <button onclick={() => void downloadPreviewVideo()} disabled={exportingVideo}
+            title="把逐层实时预览录制并编码为 MP4（首次使用需下载 ffmpeg.wasm ≈25MB）">
+            {exportingVideo ? `⏺ ${videoStage}` : "download 预览视频 MP4"}
+          </button>
         </figcaption>
       </figure>
     {:else if env.gate.pass}
@@ -252,7 +309,19 @@
 section { min-height: 420px; }
 .empty { color: var(--ink-soft); border: 1px dashed var(--hairline); padding: 48px 24px; text-align: center; }
 .poster-mat { margin: 0 0 16px; padding: 14px; background: #ffffff; border: 1px solid var(--hairline); box-shadow: 0 1px 0 rgba(26,26,26,.08); display: inline-block; }
-.poster-mat img { display: block; max-width: 100%; height: auto; border: 1px solid rgba(26,26,26,.12); }
+.poster-mat img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid rgba(26,26,26,.12); border-radius: 8px;
+  cursor: zoom-in; transition: box-shadow .18s, transform .18s;
+}
+.poster-mat .poster-zoom {
+  display: block; padding: 0; border: none; background: none; cursor: zoom-in;
+}
+.poster-mat .poster-zoom:hover img {
+  box-shadow: 0 14px 36px rgba(26,26,26,.22);
+  transform: translateY(-2px);
+}
+.poster-mat canvas { display: block; max-width: 100%; height: auto; border-radius: 8px; }
 .poster-mat figcaption { margin-top: 8px; font-size: 11px; color: var(--ink-soft); display: flex; gap: 10px; align-items: center; }
 .poster-mat button { background: none; border: 1px solid var(--hairline); padding: 3px 10px; cursor: pointer; font-size: 11px; }
 .poster-mat button:hover { border-color: var(--accent); }

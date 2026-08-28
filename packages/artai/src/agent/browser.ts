@@ -707,8 +707,15 @@ export class BrowserIntentProvider implements IntentProvider {
             : "");
       }
       input.onStatus?.(revision
-        ? `打磨构图 第${++revisionRound}轮…`
-        : rung === 0 ? "构图初稿…" : "构图重试…");
+        ? `打磨构图 第${++revisionRound}轮（针对 ${revision.complaints.split("; ").length} 项批评）…`
+        : rung === 0 ? "构图初稿…"
+        : `构图重试（${/length|max.?token/i.test(lastErr)
+            ? "输出截断，升级预算"
+            : /network failure|unreachable|Failed to fetch/i.test(lastErr)
+              ? "传输失败，改走备用通道"
+              : /art direction/i.test(lastErr)
+                ? "艺术总监批评"
+                : "回复解析失败"}）…`);
       let rr: RawReply;
       try {
         rr = await this.raw(attemptUser, {
