@@ -203,8 +203,9 @@ describe("composeGraph quality-revision loop", () => {
         const bad = { ...draft, layers: draft.layers.map((l: any) =>
           l.id === "focal"
             ? { id: "focal", label: "focal", depth: 8, shapes: [
-                { type: "stroke_path", lineWidth: 3, color: "#000",
-                  points: [[560, 900], [600, 1100], [660, 980]] },
+                // body exists but the subject is dead-center and thin
+                { type: "ellipse", cx: 600, cy: 1000, rx: 80, ry: 90,
+                  fill: "#cbc0dd", alpha: 0.55 },
                 { type: "organic_blob", cx: 640, cy: 950, rBase: 80,
                   harmonics: [0.1, 0.1], fill: "#888", alpha: 0.3 },
               ] }
@@ -248,7 +249,7 @@ describe("composeGraph quality-revision loop", () => {
     expect(revPrompt).toContain("PATCH FORMAT");
     expect(revPrompt).toContain("USER GUIDANCE");
     expect(revPrompt).toContain("把主体移到左下，加一只猫");
-    expect(revPrompt).toMatch(/wireframe-only|dead center/);
+    expect(revPrompt).toMatch(/has only 2 shape|dead center/);
     // the patch merged into the previous graph: unchanged layers survive,
     // the broken focal layer was replaced — still 11 layers
     expect(out.layers).toHaveLength(11);

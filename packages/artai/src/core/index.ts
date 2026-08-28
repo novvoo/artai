@@ -3,7 +3,7 @@ export { compileScene, type SceneIR, type SceneOp } from "./scene/compile.js";
 export { compilePrompt, paragraphCount } from "./prompt/compile.js";
 export { compileStructuredPrompt } from "./prompt/structured.js";
 export { irToScript } from "./scene/script.js";
-export { CompositionGraphSchema, sanitizeCompositionGraph, scanPartialGraph, critiqueGraph, buildGraphUserPrompt, GRAPH_SYSTEM_PROMPT, type CompositionGraph } from "./scene/graph.js";
+export { CompositionGraphSchema, sanitizeCompositionGraph, scanPartialGraph, critiqueGraph, normalizeLayerOrder, buildGraphUserPrompt, GRAPH_SYSTEM_PROMPT, type CompositionGraph } from "./scene/graph.js";
 export {
   drawGraphToCtx,
   renderGraph,

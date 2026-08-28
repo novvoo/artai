@@ -673,7 +673,8 @@ export class BrowserIntentProvider implements IntentProvider {
     userNote?: string;
   }): Promise<import("../core/scene/graph.js").CompositionGraph> {
     const { GRAPH_SYSTEM_PROMPT, GRAPH_JSONL_SYSTEM_PROMPT,
-            buildGraphUserPrompt, buildGraphJsonlUserPrompt, critiqueGraph } =
+            buildGraphUserPrompt, buildGraphJsonlUserPrompt, critiqueGraph,
+            normalizeLayerOrder } =
       await import("../core/scene/graph.js");
 
     let lastErr = "", preview = "", diag = "";
@@ -878,6 +879,11 @@ export class BrowserIntentProvider implements IntentProvider {
         const minLayers = lenient ? 6 : 8;
         if (!Array.isArray(parsed.layers) || parsed.layers.length < minLayers)
           throw new Error(`graph has ${parsed.layers?.length ?? 0} layers \u2014 fewer than ${minLayers}`);
+        // deterministic layer-order repair BEFORE the audit: mis-depthed
+        // paper/focal/finishers get canonical positions without an LLM call,
+        // so order defects never burn a patch round
+        if (Array.isArray(parsed.layers))
+          parsed.layers = normalizeLayerOrder(parsed.layers) as typeof parsed.layers;
         const graph = { lightDeg: parsed.lightDeg ?? 145,
                         layers: parsed.layers as import("../core/scene/graph.js").CompositionGraph["layers"],
                         paletteLocked: input.paletteHexes };

@@ -216,6 +216,57 @@ export function sanitizeCompositionGraph(raw: unknown): CompositionGraph {
   return CompositionGraphSchema.parse(raw);
 }
 
+/* ------------------------ layer-order normalization ----------------------- */
+
+const isFinisherLayer = (l: any): boolean =>
+  Array.isArray(l.shapes) &&
+  (l.shapes as Array<Record<string, unknown>>).some(
+    (s) => s?.type === "grain" || s?.type === "vignette");
+
+const isPaperLayer = (l: any): boolean =>
+  Array.isArray(l.shapes) &&
+  (l.shapes as Array<Record<string, unknown>>).some(
+    (s) => s?.type === "gradient_fill" &&
+      Number(s?.x ?? 0) <= 1 && Number(s?.y ?? 0) <= 1 &&
+      Number(s?.w ?? 0) >= 1100 && Number(s?.h ?? 0) >= 1900);
+
+/** structural subject test — a layer carrying solid body primitives
+ * (ellipse / round_rect / closed silhouette). Depth-independent: the
+ * normalizeLayerOrder renumbering must not change what "the subject" is. */
+const hasSolidBodyLayer = (l: any): boolean =>
+  Array.isArray(l.shapes) &&
+  (l.shapes as Array<any>).some((s) => s?.type === "ellipse" || s?.type === "round_rect" ||
+    (s?.type === "stroke_path" && Array.isArray(s.points) && s.points.length >= 4 &&
+     Math.hypot(
+       s.points[0]![0]! - s.points[s.points.length - 1]![0]!,
+       s.points[0]![1]! - s.points[s.points.length - 1]![1]!,
+     ) < 40));
+
+/**
+ * Deterministic layer-order repair. The model writes depth values, and a
+ * stale/wrong depth makes the paper repaint OVER everything (or the focal
+ * sink beneath washes). Instead of trusting the authored numbers: order
+ * paper first → content by their authored depth (stable) → finishers last,
+ * then re-issue depths evenly across 0..10. Fixes any ordering defect
+ * without an LLM round-trip — applied to fresh graphs AND cache hits.
+ */
+export function normalizeLayerOrder<
+  L extends Record<string, unknown>,
+>(layers: L[]): L[] {
+  if (!Array.isArray(layers) || layers.length < 2) return layers;
+  const content = layers.filter((l) => !isFinisherLayer(l));
+  const finishers = layers.filter(isFinisherLayer);
+  const paper = content.filter(isPaperLayer);
+  const rest = content.filter((l) => !paper.includes(l));
+  rest.sort((a, b) => Number(a.depth ?? 0) - Number(b.depth ?? 0)); // stable
+  const ordered = [...paper, ...rest, ...finishers];
+  const n = ordered.length;
+  return ordered.map((l, i) => ({
+    ...l,
+    depth: n <= 1 ? 0 : Math.min(10, Math.round((i * 10) / (n - 1))),
+  }));
+}
+
 /* ------------------------ art-direction linting --------------------------- */
 
 interface CritiqueShape {
@@ -243,57 +294,49 @@ export function critiqueGraph(
   const layers = Array.isArray(graph.layers) ? graph.layers : [];
   if (!layers.length) return ["graph has no layers at all"];
 
-  const focal = layers.filter((l) => Number(l.depth ?? 0) >= 7);
-  const focalShapes = focal.flatMap((l) => l.shapes ?? []);
-  const centerX = (s: CritiqueShape): number => {
-    if (typeof s.cx === "number") return s.cx;
-    if (typeof s.x === "number" && typeof s.w === "number") return s.x + s.w / 2;
-    return NaN;
-  };
-  const centerY = (s: CritiqueShape): number => {
-    if (typeof s.cy === "number") return s.cy;
-    if (typeof s.y === "number" && typeof s.h === "number") return s.y + s.h / 2;
-    return NaN;
-  };
-
-  // 1. focal object must exist and be built from substantial geometry
-  if (!focal.length) {
-    issues.push("no focal layer at depth \u2265 7 \u2014 the poster has no subject");
-  } else {
-    const closed = focalShapes.some((s) =>
-      s.type === "stroke_path" && Array.isArray(s.points) && s.points.length >= 4 &&
-      Math.hypot(
-        s.points[0]![0]! - s.points[s.points.length - 1]![0]!,
-        s.points[0]![1]! - s.points[s.points.length - 1]![1]!,
-      ) < 40);
-    const hasBody = focalShapes.some((s) =>
-      s.type === "ellipse" || s.type === "round_rect" || closed);
-    if (!hasBody)
-      issues.push(
-        "focal subject is wireframe-only \u2014 add an ellipse/round_rect body or a closed silhouette stroke_path so it reads as a solid",
-      );
-    else if (focalShapes.length < 4)
-      issues.push(
-        `focal layer has only ${focalShapes.length} shape(s) \u2014 add interior strokes and shading blobs for volume`,
-      );
-  }
-
-  // 2. layer-order audit — depth IS the paint order, and mis-placed layers
-  //    are the classic "该在底的没在底，该在上的没在上" failure: backgrounds
-  //    repainting over the subject, finishers buried under content.
   const depthOf = (l: CritiqueLayer): number => Number(l.depth ?? 0);
-  const isFinisher = (l: CritiqueLayer): boolean =>
-    (l.shapes ?? []).some((s) => s?.type === "grain" || s?.type === "vignette");
-  const contentLayers = layers.filter((l) => !isFinisher(l));
-  const finishers = layers.filter(isFinisher);
-  const maxContentDepth = contentLayers.length
-    ? Math.max(...contentLayers.map(depthOf)) : -1;
+  const contentLayers = layers.filter((l) => !isFinisherLayer(l));
+  const finishers = layers.filter(isFinisherLayer);
+  const bodyLayers = contentLayers.filter(hasSolidBodyLayer);
 
-  // 2a. the paper base (full-canvas gradient) must sit at the very bottom
+  // the hero subject = the TOPMOST body-carrying layer; when nothing has a
+  // solid body, the topmost content layer is treated as the (broken) focal
+  const hero = bodyLayers.length
+    ? bodyLayers.reduce((a, b) => (depthOf(b) >= depthOf(a) ? b : a))
+    : contentLayers.length
+      ? contentLayers.reduce((a, b) => (depthOf(b) >= depthOf(a) ? b : a))
+      : null;
+  const heroShapes = (hero?.shapes ?? []) as Array<any>;
+
+  const centerX = (s: any): number => {
+    if (typeof s?.cx === "number") return s.cx;
+    if (typeof s?.x === "number" && typeof s?.w === "number") return s.x + s.w / 2;
+    return NaN;
+  };
+  const centerY = (s: any): number => {
+    if (typeof s?.cy === "number") return s.cy;
+    if (typeof s?.y === "number" && typeof s?.h === "number") return s.y + s.h / 2;
+    return NaN;
+  };
+  const fxs = heroShapes.map(centerX).filter(Number.isFinite);
+  const fys = heroShapes.map(centerY).filter(Number.isFinite);
+
+  // 1. the poster needs a subject built from solid geometry
+  if (!bodyLayers.length)
+    issues.push(
+      "no focal subject with a solid body \u2014 add an ellipse/round_rect body or a closed silhouette stroke_path so the poster has a subject",
+    );
+  else if (heroShapes.length < 4)
+    issues.push(
+      `focal layer "${hero!.id ?? "?"}" has only ${heroShapes.length} shape(s) \u2014 add interior strokes and shading blobs for volume`,
+    );
+
+  // 2. layer-order audit \u2014 depth IS the paint order: backgrounds must not
+  //    repaint over the subject, finishers must not be buried
   const paperLayer = layers.find((l) =>
-    (l.shapes ?? []).some((s) => s?.type === "gradient_fill" &&
-      Number(s.x ?? 0) <= 1 && Number(s.y ?? 0) <= 1 &&
-      Number(s.w ?? 0) >= 1100 && Number(s.h ?? 0) >= 1900));
+    (l.shapes ?? []).some((s: any) => s?.type === "gradient_fill" &&
+      Number(s?.x ?? 0) <= 1 && Number(s?.y ?? 0) <= 1 &&
+      Number(s?.w ?? 0) >= 1100 && Number(s?.h ?? 0) >= 1900));
   if (paperLayer) {
     const others = layers.filter((l) => l !== paperLayer).map(depthOf);
     if (others.length && depthOf(paperLayer) > Math.min(...others))
@@ -302,51 +345,49 @@ export function critiqueGraph(
       );
   }
 
-  // 2b. the subject layer(s) — carrying solid body primitives — must paint
-  //     above every other content layer. Identification is STRUCTURAL (body
-  //     primitives), not depth-based: a mis-placed content layer at depth 9
-  //     would otherwise classify itself as focal and escape the audit.
-  const hasSolidBody = (l: CritiqueLayer): boolean =>
-    (l.shapes ?? []).some((s) => s?.type === "ellipse" || s?.type === "round_rect" ||
-      (s?.type === "stroke_path" && Array.isArray(s.points) && s.points.length >= 4 &&
-       Math.hypot(
-         s.points[0]![0]! - s.points[s.points.length - 1]![0]!,
-         s.points[0]![1]! - s.points[s.points.length - 1]![1]!,
-       ) < 40));
-  const bodyLayers = contentLayers.filter(hasSolidBody);
   if (bodyLayers.length) {
-    const subjectTop = Math.max(...bodyLayers.map(depthOf));
-    const subjectIdx = layers.indexOf(bodyLayers[0]!);
+    const bodyTop = Math.max(...bodyLayers.map(depthOf));
+    // content geometry painting over the subject body
     const over = contentLayers.find((l) => {
       if (bodyLayers.includes(l)) return false;
       const d = depthOf(l);
-      // strictly above, or same depth but later in array (stable sort paints it over)
-      return d > subjectTop || (d === subjectTop && layers.indexOf(l) > subjectIdx);
+      return d > bodyTop;
     });
     if (over)
       issues.push(
-        `layer "${over.id ?? over.label ?? "?"}" (depth ${depthOf(over)}) paints OVER the focal subject \u2014 content must sit below depth ${subjectTop}; move atmospheric/structure layers behind`,
+        `layer "${over.id ?? over.label ?? "?"}" (depth ${depthOf(over)}) paints OVER the focal subject \u2014 content must sit below depth ${bodyTop}; move atmospheric/structure layers behind`,
+      );
+    // large covering washes above the subject body (\u226525% of the canvas)
+    const covering = contentLayers.find((l) => {
+      if (bodyLayers.includes(l)) return false;
+      if (depthOf(l) <= bodyTop) return false;
+      return (l.shapes ?? []).some((s: any) => s?.type === "gradient_fill" &&
+        Number(s?.w ?? 0) * Number(s?.h ?? 0) >= 0.25 * 1200 * 2000);
+    });
+    if (covering)
+      issues.push(
+        `large wash "${covering.id ?? "?"}" (depth ${depthOf(covering)}) paints over the subject layers below \u2014 covering washes belong behind the subject`,
       );
   }
 
-  // 2c. grain/vignette finishers belong on top of everything
+  // 3. grain/vignette finishers belong on top of everything
   if (!finishers.length)
     issues.push(
       "no grain/vignette finisher layer \u2014 the printed-media pass is missing; add one above all content",
     );
-  else if (finishers.some((l) => depthOf(l) < maxContentDepth))
+  else if (finishers.some((l) => depthOf(l) < Math.max(...contentLayers.map(depthOf))))
     issues.push(
-      `grain/vignette layer (depth ${Math.min(...finishers.map(depthOf))}) is buried under content (top content depth ${maxContentDepth}) \u2014 finishers must be the topmost layers`,
+      `grain/vignette layer (depth ${Math.min(...finishers.map(depthOf))}) is buried under content \u2014 finishers must be the topmost layers`,
     );
 
-  // 3. layer count: the brief asks for 10–13 — models park at the old
+  // 4. layer count: the brief asks for 10\u201313 \u2014 models park at the old
   //    "at least 8" floor and produce sketch-like compositions
   if (layers.length < 10)
     issues.push(
       `only ${layers.length} layers \u2014 the brief asks for 10\u201313; add atmospheric, structure and detail layers`,
     );
 
-  // 4. density: sparse layers are why posters read as "crude" — every
+  // 5. density: sparse layers are why posters read as "crude" \u2014 every
   //    background/midground layer needs real geometry, not one token shape
   const shapeTotal = layers.reduce((a, l) => a + (l.shapes?.length ?? 0), 0);
   if (shapeTotal < layers.length * 2.5)
@@ -354,9 +395,7 @@ export function critiqueGraph(
       `too sparse: ${shapeTotal} shapes across ${layers.length} layers \u2014 aim for 3\u20135 shapes per layer (focal 6\u201310); add washes, structure strokes, shading blobs and accent details`,
     );
 
-  // 5. light direction vs shading masses (lightDeg must actually matter)
-  const fxs = focalShapes.map(centerX).filter(Number.isFinite);
-  const fys = focalShapes.map(centerY).filter(Number.isFinite);
+  // 6. light direction vs shading masses (lightDeg must actually matter)
   if (fxs.length && fys.length) {
     const rad = ((typeof graph.lightDeg === "number" ? graph.lightDeg : 145) * Math.PI) / 180;
     const lx = Math.cos(rad);
@@ -381,9 +420,9 @@ export function critiqueGraph(
     }
   }
 
-  // 6. value range: everything at similar alpha reads flat
+  // 7. value range: everything at similar alpha reads flat
   const alphas = layers.flatMap((l) => (l.shapes ?? []))
-    .map((s) => Number(s.alpha))
+    .map((s: any) => Number(s?.alpha))
     .filter((a) => Number.isFinite(a) && a < 0.98); // ignore the paper base
   if (alphas.length >= 4) {
     const spread = Math.max(...alphas) - Math.min(...alphas);
@@ -393,7 +432,7 @@ export function critiqueGraph(
       );
   }
 
-  // 7. dead-center focal = static composition
+  // 8. dead-center focal = static composition
   if (fxs.length && fys.length) {
     const cx = fxs.reduce((a, b) => a + b, 0) / fxs.length;
     const cy = fys.reduce((a, b) => a + b, 0) / fys.length;

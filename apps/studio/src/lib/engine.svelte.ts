@@ -215,8 +215,12 @@ class Engine {
       // floor 6 matches composeGraph's lenient acceptance so polished
       // salvaged versions (6–7 layers) still round-trip through the cache
       if (hit && Array.isArray(hit.layers) && hit.layers.length >= 6) {
-        this.pushLog(`③ 构图命中缓存（${hit.layers.length} 层）`);
-        return hit;
+        // stale cached graphs predate the layer-order gate — normalize
+        // deterministically (paper bottom, focal high, finishers top)
+        const { normalizeLayerOrder } = await import("artai/core");
+        const fixed = { ...hit, layers: normalizeLayerOrder(hit.layers) };
+        this.pushLog(`③ 构图命中缓存（${fixed.layers.length} 层，已规范化层序）`);
+        return fixed;
       }
     }
     const graph = await bpInstance().composeGraph({
