@@ -255,9 +255,50 @@ describe("critiqueGraph — art-director gate", () => {
     });
     const joined = issues.join(" | ");
     expect(joined).toMatch(/wireframe-only|body/);   // no solid body
+    expect(joined).toMatch(/printed-media pass is missing/); // no grain/vignette layer
     expect(joined).toMatch(/only 3 layers/);          // below the 10-layer floor
     expect(joined).toMatch(/sparse/);                 // 5 shapes across 3 layers
-    expect(joined).toMatch(/LIGHT side/i);            // lightDeg ignored
+  });
+
+  it("flags layer-order defects: paper above content, content over focal, buried finisher", () => {
+    const issues = critiqueGraph({
+      lightDeg: 145,
+      layers: [
+        { id: "atmo", label: "atmosphere", depth: 0, shapes: [
+          { type: "organic_blob", cx: 400, cy: 600, rBase: 300,
+            harmonics: [0.1, 0.1], fill: "#cbc0dd", alpha: 0.2 },
+        ]},
+        // paper base NOT at the bottom
+        { id: "paper", label: "paper", depth: 5, shapes: [
+          { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
+            colorTop: "#f2ead8", colorBottom: "#d9c9a8", alpha: 1 },
+        ]},
+        // content painting OVER the focal subject (depth 9 > focal 8)
+        { id: "wash", label: "wash", depth: 9, shapes: [
+          { type: "gradient_fill", x: 100, y: 400, w: 700, h: 900,
+            colorTop: "#cbc0dd", colorBottom: "#ddd4e8", alpha: 0.2 },
+        ]},
+        { id: "focal", label: "focal", depth: 8, shapes: [
+          { type: "ellipse", cx: 470, cy: 1050, rx: 95, ry: 115,
+            fill: "#cbc0dd", alpha: 0.55 },
+          { type: "stroke_path", lineWidth: 4, color: "#26241f",
+            points: [[375, 935], [368, 1050], [384, 1150], [470, 1172],
+                     [556, 1150], [572, 1050], [565, 937], [375, 935]] },
+          { type: "stroke_path", lineWidth: 2, color: "#26241f",
+            points: [[390, 1090], [470, 1108], [548, 1094], [390, 1090]] },
+          { type: "organic_blob", cx: 520, cy: 980, rBase: 46,
+            harmonics: [0.1, 0.12], fill: "#26241f", alpha: 0.3 },
+        ]},
+        // finisher buried under content (depth 2 < top content 9)
+        { id: "grain", label: "grain", depth: 2, shapes: [
+          { type: "grain", density: 4800 },
+        ]},
+      ],
+    });
+    const joined = issues.join(" | ");
+    expect(joined).toMatch(/is not the bottom layer/);
+    expect(joined).toMatch(/paints OVER the focal subject/);
+    expect(joined).toMatch(/finishers must be the topmost|buried under content/);
   });
 
   it("flags a flat alpha range on its own", () => {

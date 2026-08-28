@@ -60,6 +60,10 @@ function artGoodGraph() {
       { type: "stroke_path", lineWidth: 2, color: "#26241f",
         points: [[390, 1090], [470, 1108], [548, 1094], [390, 1090]] },
     ]},
+    { id: "finish", label: "finish", depth: 9, shapes: [
+      { type: "grain", density: 4800 },
+      { type: "vignette", intensity: 0.12 },
+    ]},
   );
   return { lightDeg: 315, layers, paletteLocked: ["#d8412f", "#26241f", "#e9e0cc"] };
 }
@@ -232,8 +236,8 @@ describe("composeGraph quality-revision loop", () => {
     expect(revPrompt).toContain("REVISING");
     expect(revPrompt).toContain("PREVIOUS GRAPH");
     expect(revPrompt).toMatch(/wireframe-only|dead center/);
-    // the revised graph won (artGoodGraph has 10 layers)
-    expect(out.layers).toHaveLength(10);
+    // the revised graph won (artGoodGraph has 11 layers)
+    expect(out.layers).toHaveLength(11);
     // live progress surfaced both steps
     expect(statuses.some((s) => s.includes("打磨"))).toBe(true);
   });
@@ -256,7 +260,7 @@ describe("composeGraph quality-revision loop", () => {
       previousGraph: { graphJson: '{"lightDeg":315,"layers":[]}' },
       onStatus: (s) => statuses.push(s),
     });
-    expect(out.layers).toHaveLength(10);
+    expect(out.layers).toHaveLength(11);
     // single polished attempt: the seed carries an ELEVATE brief when the
     // incoming graph had no deterministic complaints
     const prompt = bodies[0]!.messages[0]!.content;
@@ -575,7 +579,7 @@ describe("anthropic-compatible proxy gateway (GLM, etc.)", () => {
       fullSpec: "brief", paletteHexes: ["#aa0000", "#26241f", "#e9e0cc"], theme: "t",
     });
     expect(out.lightDeg).toBe(315);
-    expect(out.layers).toHaveLength(10);
+    expect(out.layers).toHaveLength(11);
   });
   it("parses valid replies from URLs already carrying /v1 without double-appending", async () => {
     const urls: string[] = [];
@@ -745,7 +749,7 @@ describe("streaming (SSE) transports", () => {
     // streamed pieces concatenated reconstruct the exact graph text
     expect(deltas.join("")).toBe(graph);
     expect(out.lightDeg).toBe(315);
-    expect(out.layers).toHaveLength(10);
+    expect(out.layers).toHaveLength(11);
   });
 
   it("composeGraph streams even with NO delta consumer (gateway idle-timeout guard)", async () => {
@@ -767,7 +771,7 @@ describe("streaming (SSE) transports", () => {
       fullSpec: "brief", paletteHexes: ["#a00000", "#26241f", "#e9e0cc"], theme: "t",
     });
     expect(out.lightDeg).toBe(315);
-    expect(out.layers).toHaveLength(10);
+    expect(out.layers).toHaveLength(11);
   });
 
   it("openai-compatible wire: accumulates delta.content frames into one reply", async () => {

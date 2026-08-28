@@ -690,8 +690,11 @@ export class BrowserIntentProvider implements IntentProvider {
       if (revision) {
         attemptUser = r.user +
           "\n\nYou are REVISING your previous composition for this same brief." +
+          "\nDo NOT assume the previous graph is correct \u2014 AUDIT it before revising:" +
+          "\n\u2022 depth = paint order: paper base must be depth 0; the focal subject above ALL content layers; grain/vignette topmost" +
+          "\n\u2022 every layer carries 3\u20135 shapes (focal 6\u201310); shading masses opposite lightDeg" +
           "\n\n=== PREVIOUS GRAPH ===\n" + revision.graphJson +
-          "\n\n=== ART-DIRECTOR COMPLAINTS (fix every one; keep what already works) ===" +
+          "\n\n=== ART-DIRECTOR COMPLAINTS (fix every one; it verified the graph, not blessed it) ===" +
           revision.complaints.split("; ").map((c) => `\n\u2022 ${c}`).join("") +
           "\n\nOutput the COMPLETE revised graph." +
           (truncatedLastRun
