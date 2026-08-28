@@ -6,6 +6,7 @@ import {
   mulberry32,
 } from "../../src/core/scene/graphRender.js";
 import { sanitizeCompositionGraph, critiqueGraph } from "../../src/core/scene/graph.js";
+import { overlayAvoidSubject } from "../../src/render/index.js";
 
 /** minimal ctx double: absorbs every call, records fill/stroke ops */
 function makeCtxStub() {
@@ -229,6 +230,55 @@ describe("graphRender", () => {
     // one fill for the body + one stroke pass chain
     expect(calls.filter((c) => c.fn === "fill").length).toBeGreaterThanOrEqual(1);
     expect(calls.some((c) => c.fn === "closePath")).toBe(true);
+  });
+});
+
+describe("overlayAvoidSubject — text keeps off the artwork", () => {
+  const graph = {
+    lightDeg: 315,
+    layers: [
+      { id: "paper", label: "paper", depth: 0, shapes: [
+        { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000, alpha: 1 },
+      ]},
+      { id: "focal", label: "cup", depth: 8, shapes: [
+        { type: "ellipse", cx: 600, cy: 1000, rx: 200, ry: 240,
+          fill: "#cbc0dd", alpha: 0.55 },
+        { type: "organic_blob", cx: 600, cy: 1000, rBase: 90,
+          harmonics: [0.1], fill: "#26241f", alpha: 0.3 },
+      ]},
+    ],
+  };
+  const ir = {
+    canvas: { width: 1200, height: 2000 },
+    ops: [
+      { op: "text", str: "错过的夏天", at: [600, 1050], sizePx: 64,
+        mode: "headline-object", color: "#26241f" },
+      { op: "microtext", str: "NO.0721", align: "right", at: [1116, 1900],
+        sizePx: 12, color: "#5b574e" },
+    ],
+  };
+
+  it("moves a text op that lands on the subject", () => {
+    const out = overlayAvoidSubject(graph, ir) as typeof ir;
+    const text = out.ops[0] as any;
+    // headline (5 CJK chars @ ~108px ≈ 540px wide) relocated to the bottom
+    // band — its estimated ink box must clear the subject's bottom edge (1240)
+    expect(text.at[0]).not.toBe(600);
+    expect(text.at[1] - 108).toBeGreaterThan(1240);
+  });
+
+  it("leaves text that already sits in the clear untouched", () => {
+    const out = overlayAvoidSubject(graph, ir) as typeof ir;
+    const micro = out.ops[1] as any;
+    expect(micro.at[0]).toBe(1116);
+    expect(micro.at[1]).toBe(1900);
+  });
+
+  it("is a no-op when the graph has no subject layer", () => {
+    const bare = { layers: [{ id: "paper", depth: 0, shapes: [
+      { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000, alpha: 1 },
+    ]}] };
+    expect(overlayAvoidSubject(bare, ir)).toBe(ir);
   });
 });
 

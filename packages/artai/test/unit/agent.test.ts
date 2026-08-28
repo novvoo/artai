@@ -6,6 +6,7 @@ import {
   parseGraphJsonl,
   repairTruncatedJson,
   ProviderContractViolation,
+  directBlockedOrigins,
 } from "../../src/agent/browser.js";
 import { ImageGenClient } from "../../src/agent/image.js";
 import { IntentDraftSchema } from "../../src/core/types/index.js";
@@ -13,6 +14,7 @@ import { scanPartialGraph } from "../../src/core/scene/graph.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  directBlockedOrigins.clear(); // per-test isolation for the CORS memo
 });
 
 function jsonOk(body: unknown): Response {
@@ -170,6 +172,14 @@ describe("parseGraphJsonl — per-line composition replies", () => {
     expect(out.badLines).toBe(0); // never even attempted — no closing brace
   });
 
+  it("harvests patch remove-lines", () => {
+    const out = parseGraphJsonl(
+      '{"lightDeg":90}\n{"remove":"l0"}\n' + layer(1),
+    );
+    expect(out.removes).toEqual(["l0"]);
+    expect(out.layers).toHaveLength(1);
+  });
+
   it("unwraps a legacy full-object reply line", () => {
     const out = parseGraphJsonl(
       `{"lightDeg":45,"layers":[${layer(0)},${layer(1)}]}`,
@@ -188,34 +198,33 @@ describe("composeGraph quality-revision loop", () => {
       bodies.push(body);
       call++;
       if (call === 1) {
-        // first draft: dead-center wireframe focal — the director complains
-        return Promise.resolve(new Response(JSON.stringify({
-          content: [{ text: JSON.stringify({
-            lightDeg: 145,
-            layers: [
-              { id: "paper", label: "paper", depth: 0, shapes: [
-                { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
-                  colorTop: "#f2ead8", colorBottom: "#d9c9a8", alpha: 1 },
-              ]},
-              ...Array.from({ length: 7 }, (_, i) => ({
-                id: `l${i}`, label: `layer ${i}`, depth: i + 1,
-                shapes: [{ type: "vignette", intensity: 0.1 }],
-              })),
-              { id: "focal", label: "focal", depth: 8, shapes: [
+        // first draft: dense everywhere EXCEPT a dead-center wireframe focal
+        const draft = artGoodGraph();
+        const bad = { ...draft, layers: draft.layers.map((l: any) =>
+          l.id === "focal"
+            ? { id: "focal", label: "focal", depth: 8, shapes: [
                 { type: "stroke_path", lineWidth: 3, color: "#000",
                   points: [[560, 900], [600, 1100], [660, 980]] },
                 { type: "organic_blob", cx: 640, cy: 950, rBase: 80,
                   harmonics: [0.1, 0.1], fill: "#888", alpha: 0.3 },
-              ]},
-            ],
-            paletteLocked: ["#d8412f", "#26241f", "#e9e0cc"],
-          }) }],
+              ] }
+            : l) };
+        return Promise.resolve(new Response(JSON.stringify({
+          content: [{ text: JSON.stringify(bad) }],
           stop_reason: "end_turn",
         }), { status: 200 }));
       }
-      // revision: proper graph — must pass the gate
+      // revision arrives as a PATCH: only the focal layer is re-emitted
+      const patch = [
+        '{"lightDeg":315}',
+        '{"id":"focal","label":"cup","depth":8,"shapes":[' +
+        '{"type":"ellipse","cx":470,"cy":1050,"rx":95,"ry":115,"fill":"#cbc0dd","alpha":0.55},' +
+        '{"type":"stroke_path","lineWidth":4,"color":"#26241f","points":[[375,935],[368,1050],[384,1150],[470,1172],[556,1150],[572,1050],[565,937],[375,935]]},' +
+        '{"type":"organic_blob","cx":520,"cy":980,"rBase":46,"harmonics":[0.1,0.12],"fill":"#26241f","alpha":0.3},' +
+        '{"type":"stroke_path","lineWidth":2,"color":"#26241f","points":[[390,1090],[470,1108],[548,1094],[390,1090]]}]}',
+      ].join("\n");
       return Promise.resolve(new Response(JSON.stringify({
-        content: [{ text: JSON.stringify(artGoodGraph()) }],
+        content: [{ text: patch }],
         stop_reason: "end_turn",
       }), { status: 200 }));
     }));
@@ -233,11 +242,14 @@ describe("composeGraph quality-revision loop", () => {
     // (anthropic wire: user prompt is messages[0]; the trailing assistant
     // message is just the "{" prefill)
     const revPrompt = bodies[1]!.messages[0]!.content;
-    expect(revPrompt).toContain("REVISING");
+    expect(revPrompt).toContain("PATCHING");
     expect(revPrompt).toContain("PREVIOUS GRAPH");
+    expect(revPrompt).toContain("PATCH FORMAT");
     expect(revPrompt).toMatch(/wireframe-only|dead center/);
-    // the revised graph won (artGoodGraph has 11 layers)
+    // the patch merged into the previous graph: unchanged layers survive,
+    // the broken focal layer was replaced — still 11 layers
     expect(out.layers).toHaveLength(11);
+    expect(out.layers.find((l: any) => l.id === "atmo3")).toBeTruthy();
     // live progress surfaced both steps
     expect(statuses.some((s) => s.includes("打磨"))).toBe(true);
   });
@@ -264,7 +276,7 @@ describe("composeGraph quality-revision loop", () => {
     // single polished attempt: the seed carries an ELEVATE brief when the
     // incoming graph had no deterministic complaints
     const prompt = bodies[0]!.messages[0]!.content;
-    expect(prompt).toContain("REVISING");
+    expect(prompt).toContain("PATCHING");
     expect(prompt).toContain("ELEVATE");
     expect(statuses.some((s) => s.includes("打磨"))).toBe(true);
   });

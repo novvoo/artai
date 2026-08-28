@@ -1,6 +1,7 @@
 <script lang="ts">
   import { engine } from "../lib/engine.svelte.js";
-  import { irToScript, drawGraphToCtx, scanPartialGraph } from "artai/core";
+  import { irToScript, scanPartialGraph } from "artai/core";
+  import { paintGraphOntoCanvas } from "artai/render";
 
   const pct = (v: number): string => `${(v * 100).toFixed(1)}%`;
 
@@ -44,6 +45,7 @@
       const { exportPreviewVideo } = await import("../lib/previewVideo.js");
       const blob = await exportPreviewVideo({
         graph: engine.graph,
+        ir: env.ir,
         width: env.ir.canvas.width,
         height: env.ir.canvas.height,
         seed: Number(env.meta?.seedUsed ?? 1),
@@ -58,7 +60,11 @@
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     } catch (e) {
-      engine.error = `预览视频导出失败：${e instanceof Error ? e.message : String(e)}`;
+      const msg = e instanceof Error ? e.message : String(e);
+      const hint = /Failed to fetch dynamically imported module/i.test(msg)
+        ? "（dev 环境：请重启 dev server，让 Vite 预打包新安装的 ffmpeg 依赖）"
+        : "";
+      engine.error = `预览视频导出失败：${msg}${hint}`;
     } finally {
       exportingVideo = false;
       videoStage = "";
@@ -96,8 +102,11 @@
     if (!ctx) return;
     c.width = base.width;
     c.height = base.height;
-    drawGraphToCtx(ctx,
+    // graph pixels + the SAME typography overlay the exported poster gets —
+    // the reveal's last frame and the final PNG are pixel-identical
+    paintGraphOntoCanvas(ctx,
       { lightDeg: lightDeg ?? 145, layers, paletteLocked: base.paletteHexes } as any,
+      engine.envelope?.ir ?? null,
       { width: base.width, height: base.height, seed: base.seed >>> 0 });
   }
 
@@ -166,10 +175,6 @@
           {engine.renderWarnings.length ? ` · ${engine.renderWarnings.length} warnings` : ""}
           {engine.polishRound > 0 ? ` · ✦ 已打磨 ${engine.polishRound} 轮` : ""}
           <button onclick={() => engine.pngUrl && downloadPng(engine.pngUrl)}>download PNG</button>
-          <button onclick={() => void downloadPreviewVideo()} disabled={exportingVideo}
-            title="把逐层实时预览录制并编码为 MP4（首次使用需下载 ffmpeg.wasm ≈25MB）">
-            {exportingVideo ? `⏺ ${videoStage}` : "download 预览视频 MP4"}
-          </button>
         </figcaption>
       </figure>
     {:else if env.gate.pass}
@@ -233,6 +238,12 @@
             <canvas bind:this={liveCanvas} style:width="150px"></canvas>
             {#if !playing && !livePartial && sortedLayers.length > 1}
               <button class="replay" onclick={() => replayTick++}>重播</button>
+            {/if}
+            {#if sortedLayers.length}
+              <button class="replay" onclick={() => void downloadPreviewVideo()} disabled={exportingVideo}
+                title="把逐层实时预览录制并编码为 MP4（本地 ffmpeg.wasm，无需联网）">
+                {exportingVideo ? `⏺ ${videoStage}` : "⬇ 导出预览视频 MP4"}
+              </button>
             {/if}
           </figure>
           <div class="graph-meta mono">

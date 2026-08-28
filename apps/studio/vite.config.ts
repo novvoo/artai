@@ -87,6 +87,12 @@ export default defineConfig({
       { find: /^artai$/, replacement: join(libSrc, "index.ts") },
     ],
   },
+  optimizeDeps: {
+    // @ffmpeg/* is dynamically imported on first video export; without this
+    // the dev server discovers it mid-session and the import 404s until a
+    // restart (vite re-optimizes behind a stale hash)
+    include: ["@ffmpeg/ffmpeg", "@ffmpeg/util"],
+  },
   build: {
     target: "es2022",
     sourcemap: true,

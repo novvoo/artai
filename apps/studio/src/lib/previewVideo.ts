@@ -3,13 +3,15 @@
  * composition graph as an MP4, via ffmpeg.wasm.
  *
  * Pipeline: draw reveal frames deterministically on an offscreen canvas
- * (same drawGraphToCtx engine as the live preview) → JPEG sequence into
- * ffmpeg's virtual FS → libx264 encode → Blob download.
+ * (same paintGraphOntoCanvas engine as the live preview) → JPEG sequence
+ * into ffmpeg's virtual FS → libx264 encode → Blob download.
  *
- * The single-threaded @ffmpeg/core build is used, so no SharedArrayBuffer /
- * COOP-COEP headers are required; the core itself is fetched from CDN at
- * click time (~25 MB, cached by the browser afterwards).
+ * The single-threaded @ffmpeg/core build is used (no SharedArrayBuffer /
+ * COOP-COEP headers required) and ships from node_modules via Vite ?url
+ * asset imports — fully offline, no CDN round-trip.
  */
+import coreJsUrl from "@ffmpeg/core?url";
+import coreWasmUrl from "@ffmpeg/core/wasm?url";
 
 export interface PreviewVideoOptions {
   /** composition graph (engine.graph) */
@@ -17,6 +19,8 @@ export interface PreviewVideoOptions {
     lightDeg: number;
     layers: Array<Record<string, unknown>>;
   };
+  /** scene IR — the typography/chrome overlay source (final frame = final PNG) */
+  ir: Record<string, unknown>;
   /** poster canvas dimensions (IR canvas) */
   width: number;
   height: number;
@@ -30,22 +34,23 @@ export interface PreviewVideoOptions {
 const FPS = 30;
 const FRAMES_PER_LAYER = 9; // ≈0.3s per layer reveal
 const HOLD_FRAMES = 45;     // 1.5s hold on the finished poster
-/** half resolution keeps wasm memory + encode time sane on 1200×2000 posters */
-const SCALE = 0.5;
 
 export async function exportPreviewVideo(
   opts: PreviewVideoOptions,
 ): Promise<Blob> {
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-  const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
-  const { drawGraphToCtx } = await import("artai/core");
+  const { fetchFile } = await import("@ffmpeg/util");
+  const { paintGraphOntoCanvas } = await import("artai/render");
 
   const report = opts.onProgress ?? (() => {});
   const layers = [...opts.graph.layers].sort(
     (a: any, b: any) => Number(a.depth ?? 0) - Number(b.depth ?? 0),
   );
-  const W = Math.round(opts.width * SCALE);
-  const H = Math.round(opts.height * SCALE);
+  // full poster resolution — the video is a 1:1 recording of the preview.
+  // libx264 + yuv420p require even dimensions; posters are 1200×2000 (even)
+  // but guard anyway for arbitrary canvas sizes.
+  const W = Math.round(opts.width) - (Math.round(opts.width) % 2);
+  const H = Math.round(opts.height) - (Math.round(opts.height) % 2);
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -59,13 +64,14 @@ export async function exportPreviewVideo(
   for (let f = 0; f < frameCount; f++) {
     const reveal = Math.min(layers.length, Math.floor(f / FRAMES_PER_LAYER) + 1);
     ctx.clearRect(0, 0, W, H);
-    drawGraphToCtx(
+    paintGraphOntoCanvas(
       ctx,
       {
         lightDeg: opts.graph.lightDeg,
         layers: layers.slice(0, reveal),
         paletteLocked: opts.paletteHexes ?? [],
       } as any,
+      opts.ir as any,
       { width: W, height: H, seed: opts.seed >>> 0 },
     );
     blobs.push(await new Promise<Blob>((res) =>
@@ -74,14 +80,10 @@ export async function exportPreviewVideo(
     if (f % 15 === 0) report("渲染帧", (f / frameCount) * 0.5);
   }
 
-  // ── 2. load the wasm core ───────────────────────────────────────────────
+  // ── 2. load the wasm core (local assets — works offline) ───────────────
   report("加载 ffmpeg.wasm", 0.5);
   const ffmpeg = new FFmpeg();
-  const coreBase = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
-  await ffmpeg.load({
-    coreURL: await toBlobURL(`${coreBase}/ffmpeg-core.js`, "text/javascript"),
-    wasmURL: await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, "application/wasm"),
-  });
+  await ffmpeg.load({ coreURL: coreJsUrl, wasmURL: coreWasmUrl });
   ffmpeg.on("progress", ({ progress }: { progress: number }) =>
     report("编码 MP4", 0.6 + Math.max(0, Math.min(1, progress)) * 0.4));
 

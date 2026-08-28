@@ -424,11 +424,13 @@ export function stripFence(t: string): string {
  * loses the truncated line instead of the whole reply.
  */
 export function parseGraphJsonl(text: string): {
-  lightDeg?: number | undefined; layers: Array<Record<string, unknown>>; badLines: number;
+  lightDeg?: number | undefined; layers: Array<Record<string, unknown>>;
+  removes: string[]; badLines: number;
 } {
   const cleaned = stripFence(text.trim());
   let lightDeg: number | undefined;
   const layers: Array<Record<string, unknown>> = [];
+  const removes: string[] = [];
   let badLines = 0;
   for (const raw of cleaned.split(/\r?\n/)) {
     const line = raw.trim();
@@ -440,6 +442,10 @@ export function parseGraphJsonl(text: string): {
       const o = JSON.parse(line.slice(from, to + 1).replace(/,\s*$/, "")) as
         Record<string, unknown> & { lightDeg?: number; layers?: unknown[] };
       if (typeof o.lightDeg === "number") lightDeg = o.lightDeg;
+      if (typeof o.remove === "string") {    // patch mode: delete a layer by id
+        removes.push(o.remove);
+        continue;
+      }
       if (Array.isArray(o.layers)) {         // legacy single-object line
         layers.push(...(o.layers as Array<Record<string, unknown>>));
         continue;
@@ -452,7 +458,7 @@ export function parseGraphJsonl(text: string): {
     const m2 = /"lightDeg"\s*:\s*(-?[0-9]+(?:\.[0-9]+)?)/.exec(cleaned);
     if (m2) lightDeg = Number(m2[1]);
   }
-  return { lightDeg, layers, badLines };
+  return { lightDeg, layers, removes, badLines };
 }
 
 /**

@@ -90,6 +90,9 @@ const TOKEN_RUNGS_INTENT: ReadonlyArray<number> = [2048, 6048, 6048];
 /** module-level memo of which anthropic base variant actually worked,
  * keyed by provider config — survives across BrowserIntentProvider instances */
 const anthropicBaseCache = new Map<string, string>();
+/** origins whose direct fetch previously died at network level (CORS etc.).
+ * Exported for tests so fixtures can reset the memo between cases. */
+export const directBlockedOrigins = new Set<string>();
 export { parseGraphJsonl, stripFence } from "../core/scene/graph.js";
 import { parseGraphJsonl, stripFence } from "../core/scene/graph.js";
 /**
@@ -127,10 +130,30 @@ export class BrowserIntentProvider implements IntentProvider {
    * proxy support the retry fails fast and the decorated error surfaces.
    */
   private async guardedFetch(url: string, init: RequestInit): Promise<Response> {
+    const decorate = (msg: string): Error => Object.assign(
+      new Error(/abort/i.test(msg)
+        ? "request aborted before completion"
+        : `${msg} \u2014 network failure reaching ${url} (\u68c0\u67e5\u7f51\u7edc\u8fde\u63a5 / BASE URL / \u662f\u5426\u88ab\u6d4f\u89c8\u5668 CORS \u62e6\u622a)`),
+      { name: "ProviderError" });
+
+    // origins whose direct fetch already failed at network level (CORS etc.)
+    // are remembered: later calls go straight through the local proxy so the
+    // browser stops re-printing its CORS console noise on every request
+    let origin = "";
+    try { origin = new URL(url).origin; } catch { /* relative URL */ }
+    if (origin && directBlockedOrigins.has(origin)) {
+      try {
+        return await fetch(`/artai-proxy?target=${encodeURIComponent(url)}`, init);
+      } catch { /* proxy unavailable — fall back to one direct attempt */ }
+      try { return await fetch(url, init); } catch { /* both dead */ }
+      throw decorate("Failed to fetch");
+    }
+
     try {
       return await fetch(url, init);
     } catch (e) {
       if (/^https?:\/\//i.test(url)) {
+        if (origin) directBlockedOrigins.add(origin);
         try {
           return await fetch(`/artai-proxy?target=${encodeURIComponent(url)}`, init);
         } catch { /* no passthrough here — report the direct failure */ }
@@ -138,11 +161,7 @@ export class BrowserIntentProvider implements IntentProvider {
       const msg = e instanceof Error ? e.message : String(e);
       // lead with the underlying cause: upstream error strings get sliced
       // to ~140 chars by the retry ladders, so it must survive truncation
-      throw Object.assign(
-        new Error(/abort/i.test(msg)
-          ? "request aborted before completion"
-          : `${msg} \u2014 network failure reaching ${url} (\u68c0\u67e5\u7f51\u7edc\u8fde\u63a5 / BASE URL / \u662f\u5426\u88ab\u6d4f\u89c8\u5668 CORS \u62e6\u622a)`),
-        { name: "ProviderError" });
+      throw decorate(msg);
     }
   }
 
@@ -688,20 +707,32 @@ export class BrowserIntentProvider implements IntentProvider {
     } | null = null;
 
     for (let rung = 0; rung < MAX_ATTEMPTS; rung++) {
-      const r = RUNGS[Math.min(rung, RUNGS.length - 1)]!;
+      // revision attempts ALWAYS use the JSONL rung in PATCH mode: the model
+      // re-emits only the layers it changes (~1k tokens) instead of the whole
+      // graph (~6k+) — a full regen per polish round was why revisions were
+      // barely faster than the first draft
+      const r = revision ? RUNGS[RUNGS.length - 1]! : RUNGS[Math.min(rung, RUNGS.length - 1)]!;
       let attemptUser = r.user;
       if (revision) {
         attemptUser = r.user +
-          "\n\nYou are REVISING your previous composition for this same brief." +
+          "\n\nYou are PATCHING your previous composition for this same brief." +
           "\nDo NOT assume the previous graph is correct \u2014 AUDIT it before revising:" +
           "\n\u2022 depth = paint order: paper base must be depth 0; the focal subject above ALL content layers; grain/vignette topmost" +
           "\n\u2022 every layer carries 3\u20135 shapes (focal 6\u201310); shading masses opposite lightDeg" +
           "\n\n=== PREVIOUS GRAPH ===\n" + revision.graphJson +
           "\n\n=== ART-DIRECTOR COMPLAINTS (fix every one; it verified the graph, not blessed it) ===" +
           revision.complaints.split("; ").map((c) => `\n\u2022 ${c}`).join("") +
-          "\n\nOutput the COMPLETE revised graph." +
+          "\n\n=== PATCH FORMAT (CRITICAL \u2014 keeps the revision fast) ===" +
+          (revision.complaints.includes("ELEVATE")
+            ? "\n\u2022 ELEVATE brief: improve the composition with targeted patches \u2014 keep the overall composition and palette"
+            : "\n\u2022 Output ONLY the layers you change or add \u2014 one complete layer object per line") +
+          "\n\u2022 modify a layer \u2192 its COMPLETE replacement object with the SAME id" +
+          "\n\u2022 add a layer \u2192 a new object with a NEW id" +
+          "\n\u2022 delete a layer \u2192 {\"remove\":\"layerId\"}" +
+          "\n\u2022 optionally first line {\"lightDeg\":N} to change the lighting angle" +
+          "\n\u2022 DO NOT repeat unchanged layers; DO NOT re-output the whole graph" +
           (truncatedLastRun
-            ? " Stay terse: at most 10 layers, at most 4 shapes per layer, labels under 30 characters."
+            ? "\nStay terse: at most 10 layers, at most 4 shapes per layer, labels under 30 characters."
             : "");
       } else if (rung > 0) {
         attemptUser += `\n\nPrevious reply failed: ${lastErr}. Reply again with corrected output only.` +
@@ -764,8 +795,26 @@ export class BrowserIntentProvider implements IntentProvider {
         };
         if (r.jsonl) {
           const out = parseGraphJsonl(rr.text);
-          parsed = { lightDeg: out.lightDeg, layers: out.layers };
-          if (!out.layers.length)
+          if (revision) {
+            // PATCH mode: merge the changed/add/remove lines back into the
+            // previous graph locally — untouched layers are never re-emitted
+            const prev = JSON.parse(revision.graphJson) as {
+              lightDeg?: number; layers?: Array<Record<string, unknown>>;
+            };
+            const removed = new Set(out.removes);
+            const merged = (prev.layers ?? [])
+              .filter((l) => !removed.has(l.id as string));
+            for (const nl of out.layers) {
+              const idx = merged.findIndex((l) => l.id === nl.id);
+              if (idx >= 0) merged[idx] = nl;
+              else merged.push(nl);
+            }
+            parsed = { lightDeg: out.lightDeg ?? prev.lightDeg, layers: merged };
+            input.onStatus?.(`补丁合并：改 ${out.layers.length} 层 / 删 ${out.removes.length} 层 / 共 ${merged.length} 层`);
+          } else {
+            parsed = { lightDeg: out.lightDeg, layers: out.layers };
+          }
+          if (!parsed.layers?.length)
             throw new Error(out.badLines
               ? `${out.badLines} unparseable JSON lines (${diag})`
               : "no JSON lines found in reply");
