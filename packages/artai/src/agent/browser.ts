@@ -362,6 +362,7 @@ export class BrowserIntentProvider implements IntentProvider {
     const dec = new TextDecoder();
     let buf = "", acc = "", finish: string | undefined;
     for (;;) {
+      if (o.signal?.aborted) throw new DOMException("stopped by user", "AbortError");
       const { done, value } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
@@ -401,11 +402,15 @@ export class BrowserIntentProvider implements IntentProvider {
   private async consumeOpenAISSE(
     res: Response, o: AttemptOpts,
   ): Promise<RawReply> {
+    const abortCheck = (): void => {
+      if (o.signal?.aborted) throw new DOMException("stopped by user", "AbortError");
+    };
     const reader = res.body!.getReader();
     const dec = new TextDecoder();
     let buf = "", content = "", reasoning = "";
     let finish: string | undefined;
     for (;;) {
+      abortCheck();
       const { done, value } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
@@ -451,14 +456,19 @@ export class BrowserIntentProvider implements IntentProvider {
     const user = userFor(input);
 
     for (let rung = 0; rung < TOKEN_RUNGS_INTENT.length; rung++) {
+      if (input.signal?.aborted)
+        throw new DOMException("stopped by user", "AbortError");
       const maxTokens = TOKEN_RUNGS_INTENT[rung]!;
       let rr: RawReply;
       try {
         rr = await this.raw(user + retryHint(lastErr), {
           system: INTENT_SYSTEM, maxTokens,
           useRF: !this.anthropic(), prefill: this.anthropic(),
+          ...(input.signal ? { signal: input.signal } : {}),
         });
       } catch (e) {
+        if (input.signal?.aborted)
+          throw new DOMException("stopped by user", "AbortError");
         lastErr = String((e as Error).message ?? e).slice(0, 140);
         // the next rung burns real budget, so give a hiccuping endpoint
         // (rate limit, dropped connection) a beat before escalating

@@ -8,6 +8,8 @@ import type { PhotoRole } from "./recipe.js";
 export interface ParseInput {
   readonly theme: string;
   readonly hasPhoto?: boolean;
+  /** abort signal — lets the studio's 停止 button kill the in-flight call */
+  readonly signal?: AbortSignal;
 }
 
 export interface IntentProvider {

@@ -170,17 +170,30 @@ class Engine {
   private lastTheme = "";
   private timer: ReturnType<typeof setInterval> | null = null;
 
-  /** abort the in-flight run: fetches die mid-flight, checkpoints unwind */
+  /** abort the in-flight run: fetches die mid-flight, checkpoints unwind.
+   * Hard-deadline backstop: if the run hasn't unwound within 3s (a missed
+   * signal path or a stuck await), force-release the UI anyway — the stop
+   * button must never stick in "停止中…". */
   stopRun(): void {
     if (!this.busy || this.stopping) return;
     this.stopping = true;
     this.runCtrl?.abort();
     this.pushLog("■ 收到停止请求，正在中断当前阶段…");
+    setTimeout(() => {
+      if (this.stopping) {
+        this.stopping = false;
+        this.busy = false;
+        this.runCtrl = null; // zombies die at the next chk() checkpoint
+        this.pushLog("■ 已强制停止");
+      }
+    }, 3000);
   }
 
-  /** checkpoint between async stages — throws when the run was stopped */
+  /** checkpoint between async stages — throws when the run was stopped.
+   * A detached runCtrl (force-stop) also throws, so stale runs that later
+   * resolve can never resume and clobber the UI. */
   private chk(): void {
-    if (this.runCtrl?.signal.aborted)
+    if (!this.runCtrl || this.runCtrl.signal.aborted)
       throw new DOMException("stopped by user", "AbortError");
   }
 
@@ -253,7 +266,7 @@ class Engine {
         this.pushLog("\u2460 \u4e3b\u9898\u89e3\u8bfb\u547d\u4e2d\u7f13\u5b58");
       } else {
         this.pushLog("\u2460 \u89e3\u8bfb\u4e3b\u9898\u2026\uff08LLM \u8c03\u7528\uff0c\u53ef\u80fd\u591a\u8f6e\uff09");
-        draft = await bpInstance().parse({ theme: t });
+        draft = await bpInstance().parse({ theme: t, signal });
         if (useCache.on) cacheSet("intent." + draftKey, draft);
       }
       this.chk();
@@ -334,6 +347,11 @@ class Engine {
           // later stages; the final render block below is then a no-op.
           // renderGraphPoster = graph pixels + the shared typography overlay
           // (中文标题/短句/microtext), exactly what the IR paths stamp on top
+          // yield to the event loop FIRST: the render is synchronous and
+          // can take seconds — a queued 停止 click must be processed (and
+          // the run unwound) instead of freezing the UI mid-render
+          await new Promise((r) => setTimeout(r, 0));
+          this.chk();
           const poster = artai.renderGraphPoster(graph, env.ir, {
             seed: seedUsed,
             width: env.ir.canvas.width,
@@ -362,6 +380,8 @@ class Engine {
         // only the graph-failure fallback still renders here; the success
         // path already produced the final PNG straight from the graph
         this.stageLabelZh = "render...";
+        await new Promise((r) => setTimeout(r, 0));
+        this.chk();
         const r = await artai.renderPoster(env.ir, { seed: env.meta.seedUsed });
         this.pngUrl = r.dataUrl;
         this.rendererName = r.renderer;
@@ -378,7 +398,9 @@ class Engine {
         this.pngUrl = null;
       }
       clearInterval(this.timer!); this.timer = null; this.busy = false;
-      if (!this.error) {
+      this.stopping = false;
+      this.runCtrl = null;
+      if (!this.error && !signal.aborted) {
         this.stageIndex = 6; this.stageLabelZh = "done";
         this.pushLog(`✓ 完成，耗时 ${Math.round((Date.now() - t0) / 100) / 10}s`);
       }
@@ -450,6 +472,8 @@ class Engine {
       this.renderCode = this.graphScript;
       // the final PNG follows the polished graph, same engine as the preview,
       // plus the shared typography overlay (标题/短句/microtext)
+      await new Promise((r) => setTimeout(r, 0));
+      this.chk();
       const r = artai.renderGraphPoster(graph, env.ir, {
         width: env.ir.canvas.width,
         height: env.ir.canvas.height,
