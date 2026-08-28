@@ -33,7 +33,8 @@ export {
 } from "./pipeline.js";
 export { checkCore, type Violation, type ViolationCode } from "./gate/checks-core.js";
 export { checkBatch, repairBatch, type BatchViolation } from "./recipe/constraints.js";
-export { pickRecipe, ALL_FAMILIES, PHOTO_FORMS } from "./recipe/variation.js";
+export { pickRecipe, ALL_FAMILIES, PHOTO_FORMS, companionHue } from "./recipe/variation.js";
+export { mix, tint, shade, collagePalette } from "./util/color.js";
 export {
   RecipeSchema,
   parseRecipe,

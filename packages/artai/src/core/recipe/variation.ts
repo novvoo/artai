@@ -96,6 +96,11 @@ export interface RecipeOptions {
   readonly model?: string;
   /** compute-density knob (1–6); defaults to 2 when omitted */
   readonly detail?: number | undefined;
+  /** user-locked accent hex (studio 配色 preset) — bypasses the mood roll
+   * without disturbing the deterministic rng stream */
+  readonly accent?: string | undefined;
+  /** user-locked paper tone hex (studio 配色 preset) */
+  readonly paperTone?: string | undefined;
 }
 
 /** Mood-constrained hue pools: the emotional temperature steers chromatics
@@ -143,6 +148,7 @@ export function pickRecipe(draft: IntentDraft, opts: RecipeOptions): Recipe {
   // mood-steered chroma (the intent draft drives the palette family)
   const hueName = rng.weighted(moodHueWeights(draft.mood));
   const toneKeys = Object.keys(PAPER_TONES);
+  const rolledTone = rng.pick(toneKeys);
 
   return {
     schemaVersion: RecipeSchemaVersion,
@@ -151,7 +157,7 @@ export function pickRecipe(draft: IntentDraft, opts: RecipeOptions): Recipe {
     canvas: {
       ratio: [3, 5],
       width: 1200,
-      paperTone: rng.pick(toneKeys),
+      paperTone: opts.paperTone ?? rolledTone,
     },
     attention: {
       negativeSpace: round3(rng.range(0.42, 0.62)),
@@ -168,7 +174,7 @@ export function pickRecipe(draft: IntentDraft, opts: RecipeOptions): Recipe {
     type: { mode: typeMode, text: draft.shortText ?? undefined, family: "typewriter" },
     color: {
       name: hueName,
-      hue: ACCENT_HUES[hueName]!,
+      hue: opts.accent ?? ACCENT_HUES[hueName]!,
       carrier: rng.weighted(CARRIER_WEIGHTS),
       canvasShare: round4(rng.range(0.009, 0.022)),
     },

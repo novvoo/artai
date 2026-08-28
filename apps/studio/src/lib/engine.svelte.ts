@@ -2,7 +2,14 @@
 // Transaction semantics: UI commits only after all stages succeed.
 import * as artai from "artai";
 import { BrowserIntentProvider } from "artai/agent";
-import { compileStructuredPrompt } from "artai/core";
+import {
+  ACCENT_HUES,
+  PAPER_TONES,
+  companionHue,
+  shade,
+  tint,
+  compileStructuredPrompt,
+} from "artai/core";
 import type { IntentDraft } from "artai/core";
 
 const hasLS = typeof localStorage !== "undefined";
@@ -95,10 +102,47 @@ export function setUseCache(v: boolean): void { useCache.on = v; }
 export const liveMotif = $state({ on: true });
 export function setLiveMotif(v: boolean): void { liveMotif.on = v; }
 
+/* ============ palette presets (主题配色) ============ */
+export interface PalettePreset {
+  id: string;
+  label: string;
+  /** user-locked accent hex; omit = the model's mood steers chromatics */
+  accent?: string;
+  /** user-locked paper tone hex paired with the accent */
+  paper?: string;
+}
+export const PALETTES: PalettePreset[] = [
+  { id: "auto", label: "自动" },
+  { id: "tomato", label: "番茄红", accent: "#D8412F", paper: "#F5F0E6" },
+  { id: "cobalt", label: "钴蓝", accent: "#1B4FD8", paper: "#F5F0E6" },
+  { id: "cyan", label: "青碧", accent: "#00A6C8", paper: "#EFE8D8" },
+  { id: "violet", label: "紫罗兰", accent: "#6A4FC7", paper: "#E4E2DC" },
+  { id: "magenta", label: "品红", accent: "#E23D81", paper: "#EFE8D8" },
+  { id: "lemon", label: "柠檬黄", accent: "#F2C230", paper: "#E9DFC0" },
+  { id: "pear", label: "橄榄绿", accent: "#9BB53C", paper: "#D9CFAF" },
+  { id: "orange", label: "落日橙", accent: "#F26A21", paper: "#F5F0E6" },
+  { id: "ultramarine", label: "群青", accent: "#2743C6", paper: "#E4E2DC" },
+];
+export const paletteSel = $state<{ id: string }>(
+  ld("artai.palette.v1", { id: "auto" }),
+);
+export function setPalette(id: string): void {
+  paletteSel.id = id;
+  sv("artai.palette.v1", { id });
+}
+/** the locked preset, or undefined when 自動 lets the mood roll decide */
+export function activePalette(): PalettePreset | undefined {
+  const p = PALETTES.find((x) => x.id === paletteSel.id);
+  return p?.accent ? p : undefined;
+}
+
 /* ============ cache module (three-phase gen cache) ============ */
 
-async function genHash(theme: string, kind: string): Promise<string> {
-  const raw = [theme, settings.model ?? "-", kind].join("\0");
+/** scope folds the palette choice into cache keys: intent is palette-free,
+ * but a composition graph authored against one 配色 must never be served
+ * for another ("" scope = auto → legacy keys keep hitting) */
+async function genHash(theme: string, kind: string, scope = ""): Promise<string> {
+  const raw = [theme, scope, settings.model ?? "-", kind].join("\0");
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
   return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
@@ -123,6 +167,89 @@ export function cacheCount(): number {
     if (localStorage.key(i)?.startsWith("artai.gen.")) n++;
   }
   return n;
+}
+
+/* ============ run history (cached generations) ============ */
+
+export interface HistoryEntry {
+  /** cache key of the composition graph ("graph.<hash>") */
+  key: string;
+  theme: string;
+  /** the FULL user prompt as typed into the THEME textarea (multi-line) */
+  prompt: string;
+  /** polish suggestions the user applied to this entry, in order */
+  polishNotes: string[];
+  model: string;
+  /** epoch ms of the last write to this cache entry */
+  at: number;
+  layers: number;
+  shapes: number;
+  /** poster dataUrl thumbnail (downscaled, jpeg) for the list */
+  thumb?: string | undefined;
+  /** 配色 preset id the graph was authored against ("auto" = mood-driven) */
+  palette?: string;
+}
+
+const HISTORY_KEY = "artai.history.v1";
+
+export function loadHistory(): HistoryEntry[] {
+  let stored: HistoryEntry[] = [];
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    stored = raw ? (JSON.parse(raw) as HistoryEntry[]) : [];
+  } catch { stored = []; }
+  // the index is a DIRECTORY over the actual caches — entries written before
+  // this feature existed (or on another tab) are rebuilt from localStorage
+  try {
+    const known = new Set(stored.map((h) => h.key));
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith("artai.gen.graph.")) continue;
+      if (known.has(k.slice("artai.gen.".length))) continue;
+      try {
+        const g = JSON.parse(localStorage.getItem(k) ?? "null") as
+          { layers?: Array<{ shapes?: unknown[] }>; lightDeg?: number };
+        if (!Array.isArray(g?.layers) || g.layers.length < 6) continue;
+        const shapes = g.layers.reduce(
+          (a, l) => a + (Array.isArray(l.shapes) ? l.shapes.length : 0), 0);
+        stored.push({
+          key: k.slice("artai.gen.".length),
+          theme: "(旧缓存 — 生成一次以补全信息)",
+          prompt: "",
+          polishNotes: [],
+          model: "-",
+          at: 0, // sorts to the bottom until refreshed by a real run
+          layers: g.layers.length,
+          shapes,
+        });
+      } catch { /* corrupt entry — skip */ }
+    }
+  } catch { /* localStorage unavailable */ }
+  stored.sort((a, b) => b.at - a.at);
+  return stored;
+}
+
+function saveHistory(list: HistoryEntry[]): void {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 60)));
+  } catch { /* quota — history is best-effort */ }
+}
+
+/** downscale a poster dataUrl into a tiny jpeg thumbnail for the list */
+function makeThumb(dataUrl: string): Promise<string | undefined> {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = 72;
+      const h = Math.max(1, Math.round((img.height / img.width) * w));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d")?.drawImage(img, 0, 0, w, h);
+      try { res(c.toDataURL("image/jpeg", 0.7)); } catch { res(undefined); }
+    };
+    img.onerror = () => res(undefined);
+    img.src = dataUrl;
+  });
 }
 
 /* ============ engine class ============ */
@@ -153,6 +280,8 @@ class Engine {
   private runCtrl: AbortController | null = null;
   /** user's own polish suggestion (继续打磨的附加 prompt) */
   polishNote = $state("");
+  /** cached-run history index (most recent first) for the 历史记录 window */
+  history = $state<HistoryEntry[]>([]);
   /** floating windows: activity log + full-size poster lightbox */
   logOpen = $state(false);
   lightbox = $state<string | null>(null);
@@ -197,6 +326,125 @@ class Engine {
       throw new DOMException("stopped by user", "AbortError");
   }
 
+  /** the graph cache key for the current theme + palette selection */
+  private async graphCacheKey(): Promise<string> {
+    const pal = activePalette();
+    return "graph." + await genHash(this.theme.trim(), "graph:v1", pal ? pal.id : "");
+  }
+
+  /** upsert a run into the history index after a successful poster render */
+  async recordHistory(): Promise<void> {
+    if (!this.graph || !this.envelope || !this.pngUrl) return;
+    const model = String(settings.model ?? "-");
+    const theme = this.theme.trim();
+    const graphKey = await this.graphCacheKey();
+    const prev = loadHistory().find((h) => h.key === graphKey);
+    const note = this.polishNote.trim();
+    const notes = note && !prev?.polishNotes.includes(note)
+      ? [...(prev?.polishNotes ?? []), note] : (prev?.polishNotes ?? []);
+    const entry: HistoryEntry = {
+      key: graphKey,
+      theme,
+      prompt: theme,
+      polishNotes: notes,
+      model,
+      at: Date.now(),
+      palette: paletteSel.id,
+      layers: this.graph.layers.length,
+      shapes: this.graph.layers.reduce(
+        (a: number, l: any) => a + (l.shapes?.length ?? 0), 0),
+      thumb: await makeThumb(this.pngUrl),
+    };
+    const list = loadHistory().filter(
+      (h) => !(h.key === entry.key && h.model === entry.model));
+    list.unshift(entry);
+    saveHistory(list);
+    this.history = list;
+  }
+
+  /** restore a cached run: theme + seed back into the panel, graph/poster
+   * re-rendered from the cached composition (no LLM round-trip) */
+  async restoreHistory(entry: HistoryEntry): Promise<void> {
+    if (this.busy) return;
+    const hit = cacheGet<any>(entry.key);
+    if (!hit || !Array.isArray(hit.layers) || hit.layers.length < 6) {
+      this.error = `该历史记录的缓存已不存在（${entry.theme}）`;
+      return;
+    }
+    const theme = entry.theme;
+    if (theme.startsWith("(旧缓存")) {
+      this.busy = false;
+      this.error = "这是历史功能上线前的旧缓存 — 主题信息缺失，重新 GENERATE 一次该主题即可补全";
+      return;
+    }
+    this.theme = theme;
+    this.lastTheme = theme;
+    // re-lock the 配色 the graph was authored against so the re-realized
+    // IR (paper tone, accent panels) matches the cached composition
+    setPalette(entry.palette ?? "auto");
+    this.busy = true;
+    this.error = "";
+    this.stageIndex = 6;
+    this.stageLabelZh = "恢复历史…";
+    this.pushLog(`⏪ 恢复历史：${theme}（${hit.layers.length} 层）`);
+    try {
+      const { graphToScript } = await import("artai/core");
+      // recompute the deterministic seed for this theme (same formula as
+      // generate; salt=0 keeps it stable per theme)
+      const seed = ((this.baseSeed + 1) * 7919) >>> 0;
+
+      // rebuild a minimal envelope: reuse the live intent/realize caches so
+      // the palette/IR/chrome come back exactly as they were
+      const draftKey = await genHash(theme, "intent:v1");
+      let draft: IntentDraft | null = useCache.on
+        ? cacheGet<IntentDraft>("intent." + draftKey) : null;
+      if (!draft) {
+        this.busy = false;
+        this.error = "该主题的意图缓存已过期 — 请重新 GENERATE 一次以重建";
+        return;
+      }
+      artai.setDefaultProvider(bpInstance());
+      env = await artai.realize(draft, {
+        seed,
+        backend: this.backend === "render" ? "render" : "prompt",
+        ...realizeOverrides(),
+      });
+      env.prompt = artai.compilePrompt(env.recipe, env.plan, env.ir);
+      this.fullSpec = compileStructuredPrompt(env.recipe, env.plan, env.ir);
+      this.envelope = env;
+      document.documentElement.style.setProperty("--accent",
+        String(env.recipe.color.hue));
+
+      const seedUsed = Number(env.meta?.seedUsed ?? seed);
+      const { normalizeLayerOrder } = await import("artai/core");
+      const graph = { ...hit, layers: normalizeLayerOrder(hit.layers) };
+      this.graph = graph;
+      this.graphScript = graphToScript(graph, {
+        width: env.ir.canvas.width,
+        height: env.ir.canvas.height,
+        seed: seedUsed,
+      });
+      this.renderCode = this.graphScript;
+      this.graphFailed = "";
+      const poster = artai.renderGraphPoster(graph, env.ir, {
+        width: env.ir.canvas.width,
+        height: env.ir.canvas.height,
+        seed: seedUsed,
+      });
+      this.pngUrl = poster.dataUrl;
+      this.rendererName = poster.renderer;
+      this.renderWarnings = poster.warnings || [];
+      this.polishRound = 0;
+      this.pushLog(`✓ 已恢复：${graph.layers.length} 层 · ${graph.layers.reduce((a: number, l: any) => a + (l.shapes?.length ?? 0), 0)} shapes`);
+    } catch (err) {
+      this.error = fmtErr(err).slice(0, 480);
+      this.pushLog(`✗ 恢复失败：${this.error}`);
+    } finally {
+      this.busy = false;
+      this.stageLabelZh = "done";
+    }
+  }
+
   /** append one timestamped line to the live activity log */
   pushLog(msg: string): void {
     const t = new Date();
@@ -209,7 +457,7 @@ class Engine {
     env: any, fullSpec: string, onDelta?: (chunk: string) => void,
     onStatus?: (label: string) => void, signal?: AbortSignal,
   ) {
-    const key = "graph." + await genHash(this.theme.trim(), "graph:v1");
+    const key = await this.graphCacheKey();
     if (useCache.on) {
       const hit = cacheGet<any>(key);
       // floor 6 matches composeGraph's lenient acceptance so polished
@@ -236,6 +484,7 @@ class Engine {
   }
 
   async generate(): Promise<void> {
+    if (this.busy) return; // re-entry guard: no second pipeline on a stray click
     // guard: provider exists
     artai.setDefaultProvider(bpInstance());
 
@@ -281,8 +530,10 @@ class Engine {
       env = await artai.realize(draft, {
         seed,
         backend: this.backend === "render" ? "render" : "prompt",
+        ...realizeOverrides(),
       });
-      this.pushLog(`\u2713 \u914d\u65b9\u5c31\u7eea\uff1alayout=${env.recipe.layout.family} \u00b7 focal=${env.recipe.focal.form} \u00b7 hue=${env.recipe.color.hue} \u00b7 \u95e8\u7981 ${env.gate.pass ? "pass" : "degraded"}`);
+      const pal = activePalette();
+      this.pushLog(`\u2713 \u914d\u65b9\u5c31\u7eea\uff1alayout=${env.recipe.layout.family} \u00b7 focal=${env.recipe.focal.form} \u00b7 hue=${env.recipe.color.hue}${pal ? ` \u00b7 \u914d\u8272=${pal.label}` : ""} \u00b7 \u95e8\u7981 ${env.gate.pass ? "pass" : "degraded"}`);
       this.chk();
 
       document.documentElement.style.setProperty("--accent",
@@ -407,6 +658,7 @@ class Engine {
       if (!this.error && !signal.aborted) {
         this.stageIndex = 6; this.stageLabelZh = "done";
         this.pushLog(`✓ 完成，耗时 ${Math.round((Date.now() - t0) / 100) / 10}s`);
+        void this.recordHistory();
       }
     }
   }
@@ -434,6 +686,11 @@ class Engine {
     };
     this.stageIndex = 3;
     this.stageLabelZh = "继续打磨…";
+    const t0 = Date.now();
+    this.timer && clearInterval(this.timer);
+    this.timer = setInterval(() => {
+      this.elapsedSec = Math.round((Date.now() - t0) / 1000);
+    }, 1000);
     try {
       const { critiqueGraph, graphToScript } =
         await import("artai/core");
@@ -488,9 +745,10 @@ class Engine {
       this.renderWarnings = r.warnings || [];
       this.chk();
       this.pushLog(`✓ 打磨完成：${graph.layers.length} 层 · ${graph.layers.reduce((a: number, l: any) => a + (l.shapes?.length ?? 0), 0)} shapes · 海报已更新`);
+      void this.recordHistory();
       // keep the composition cache coherent with the improved version
       if (useCache.on) {
-        const key = "graph." + await genHash(this.theme.trim(), "graph:v1");
+        const key = await this.graphCacheKey();
         cacheSet(key, graph);
       }
     } catch (err) {
@@ -501,6 +759,7 @@ class Engine {
         this.pushLog(`✗ 打磨失败：${this.error}`);
       }
     } finally {
+      clearInterval(this.timer!); this.timer = null;
       this.busy = false;
       this.stopping = false;
       this.polishing = false;
@@ -514,6 +773,13 @@ class Engine {
 
 let env: any;
 
+/** realize() overrides for the user-locked 配色 preset (empty = 自动) */
+function realizeOverrides(): { accent?: string; paperTone?: string } {
+  const p = activePalette();
+  if (!p?.accent) return {};
+  return p.paper ? { accent: p.accent, paperTone: p.paper } : { accent: p.accent };
+}
+
 /** palette hexes handed to the LLM as the locked color set for the graph */
 function paletteOf(env: any): string[] {
   const c = env?.recipe?.color ?? {};
@@ -522,9 +788,16 @@ function paletteOf(env: any): string[] {
     const v = c[k];
     if (typeof v === "string" && v.trim()) hexes.push(v.trim());
   }
-  return hexes.length >= 3
-    ? hexes
-    : ["#d8412f", "#26241f", "#e9e0cc", "#fbf6ea", "#1B4FD8"];
+  if (hexes.length >= 3) return hexes;
+  // recipe.color carries only the accent — derive the full locked set from
+  // the same math the deterministic IR uses, so the graph's palette matches
+  // what will actually be painted (paper tone + shaded deep + washed panels
+  // + the mood's companion hue for two-ink motifs)
+  const accent = String(c.hue ?? "#d8412f");
+  const paper = String(PAPER_TONES[env?.recipe?.canvas?.paperTone] ?? "#F5F0E6");
+  const companion = String(
+    ACCENT_HUES[companionHue(String(env?.recipe?.mood ?? ""), String(c.name ?? ""))] ?? "#1B4FD8");
+  return [accent, shade(accent, 0.38), tint(accent, 0.74), paper, companion];
 }
 
 function bpInstance() {
@@ -559,6 +832,7 @@ function fmtErr(err: unknown): string {
 }
 
 export const engine = new Engine();
+engine.history = loadHistory();
 
 if (typeof queueMicrotask === "function") {
   queueMicrotask(() => { engine.webgl2 = typeof WebGL2RenderingContext !== 'undefined' && !!document.createElement('canvas').getContext('webgl2'); });

@@ -5,6 +5,7 @@
   import SettingsDrawer from "./components/SettingsDrawer.svelte";
   import FloatingWindow from "./components/FloatingWindow.svelte";
   import StatusCapsule from "./components/StatusCapsule.svelte";
+  import HistoryPanel from "./components/HistoryPanel.svelte";
 
   let showSettings = $state(false);
   let logBox: HTMLDivElement | null = $state(null);
@@ -59,6 +60,7 @@
 
   <!-- floating capsule: always-on pipeline status, click toggles the log -->
   <StatusCapsule />
+  <HistoryPanel />
 
   {#if engine.logOpen}
     <FloatingWindow title="实时进展" bind:open={engine.logOpen} width={470} anchor="right">

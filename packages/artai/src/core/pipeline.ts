@@ -33,6 +33,10 @@ export interface RealizeOptions {
   readonly detail?: number;
   readonly maxAttempts?: number; // mirrors the skill's regenerate-once rule, default 2
   readonly backend?: "render" | "prompt" | "hybrid";
+  /** user-locked accent hex (studio 配色 preset) — forwarded to pickRecipe */
+  readonly accent?: string;
+  /** user-locked paper tone hex (studio 配色 preset) */
+  readonly paperTone?: string;
   readonly onStage?: (stage: StageName, data?: unknown) => void;
 }
 
@@ -56,6 +60,8 @@ export function realize(draft: IntentDraft, opts: RealizeOptions): Envelope {
     const recipe = pickRecipe(draft, {
       seed: seedUsed,
       detail: opts.detail,
+      accent: opts.accent,
+      paperTone: opts.paperTone,
       contentKey: `${draft.metaphor.subject}|${draft.metaphor.relation}`,
     });
     const motifId = resolveMotifId(draft.motifHint);

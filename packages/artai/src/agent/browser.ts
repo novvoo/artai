@@ -774,7 +774,11 @@ export class BrowserIntentProvider implements IntentProvider {
               ? "传输失败，改走备用通道"
               : /art direction/i.test(lastErr)
                 ? "艺术总监批评"
-                : "回复解析失败"}）…`);
+                : /fewer than \d+ layers|too sparse|only \d+ layers/i.test(lastErr)
+                  ? `层数/密度不足（${lastErr.slice(0, 60)}）`
+                  : /no focal|wireframe|solid body|dead center|LIGHT side|finisher/i.test(lastErr)
+                    ? `构图质量未达标（${lastErr.slice(0, 60)}）`
+                    : "回复解析失败"}）…`);
       let rr: RawReply;
       try {
         rr = await this.raw(attemptUser, {

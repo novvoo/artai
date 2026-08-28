@@ -13,7 +13,12 @@
     setUseCache,
     clearGenerationCache,
     cacheCount,
+    PALETTES,
+    paletteSel,
+    setPalette,
+    activePalette,
   } from "../lib/engine.svelte.js";
+  import { shade } from "artai/core";
 
   let cacheN = $state(cacheCount());
   function toggleCache(on: boolean): void {
@@ -34,6 +39,31 @@
   <label for="theme">THEME</label>
   <textarea id="theme" rows="3" bind:value={engine.theme}></textarea>
 
+  <span id="palette-label">PALETTE</span>
+  <div class="palette-grid" role="radiogroup" aria-labelledby="palette-label">
+    {#each PALETTES as p (p.id)}
+      <button
+        class="swatch"
+        class:on={paletteSel.id === p.id}
+        role="radio"
+        aria-checked={paletteSel.id === p.id}
+        onclick={() => setPalette(p.id)}
+        title={p.accent ? `${p.label} · ${p.accent}` : "跟随模型情绪决策"}
+      >
+        {#if p.accent}
+          <span class="chip">
+            <i style={`background:${shade(p.accent, 0.38)}`}></i>
+            <i class="wide" style={`background:${p.accent}`}></i>
+            <i style={`background:${p.paper ?? "#F5F0E6"}`}></i>
+          </span>
+        {:else}
+          <span class="chip auto"></span>
+        {/if}
+        <span class="pname">{p.label}</span>
+      </button>
+    {/each}
+  </div>
+
   <div class="row">
     <label for="seed">SEED</label>
     <input id="seed" type="number" bind:value={engine.baseSeed} />
@@ -52,7 +82,7 @@
   <p class="intent-note" class:live={transportStatus() === "browser-key"}>
     {#if transportStatus() === "browser-key"}
       意图来源：<b>{providerLabel()}</b> — 模型负责主题解读与配色/情绪决策；同种子可复现，
-      再次点击会派生新种子生成不同海报
+      再次点击会派生新种子生成不同海报{#if activePalette()} · 配色已锁定：<b>{activePalette()!.label}</b>{/if}
     {:else}
       <b>尚未配置模型</b> — Web 版需要模型参与主题解读。请打开「⚙ 模型设置」完成配置。
     {/if}
@@ -121,6 +151,64 @@
     border: 1px solid var(--hairline);
     padding: 10px;
     resize: vertical;
+  }
+  .palette-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    width: 62px;
+    padding: 4px 3px 3px;
+    background: none;
+    border: 1px solid var(--hairline);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .swatch:hover {
+    border-color: var(--ink-soft);
+  }
+  .swatch.on {
+    border-color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--ink);
+  }
+  .chip {
+    display: flex;
+    width: 100%;
+    height: 16px;
+    border: 1px solid var(--hairline);
+  }
+  .chip i {
+    flex: 1;
+  }
+  .chip i.wide {
+    flex: 2;
+  }
+  .chip.auto {
+    background: conic-gradient(
+      from 210deg,
+      #d8412f,
+      #f2c230,
+      #9bb53c,
+      #00a6c8,
+      #1b4fd8,
+      #6a4fc7,
+      #e23d81,
+      #d8412f
+    );
+  }
+  .pname {
+    font-size: 10px;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .swatch.on .pname {
+    color: var(--ink);
   }
   .row {
     display: flex;

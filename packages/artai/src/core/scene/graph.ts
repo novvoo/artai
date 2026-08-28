@@ -256,8 +256,22 @@ export function normalizeLayerOrder<
   if (!Array.isArray(layers) || layers.length < 2) return layers;
   const content = layers.filter((l) => !isFinisherLayer(l));
   const finishers = layers.filter(isFinisherLayer);
-  const paper = content.filter(isPaperLayer);
-  const rest = content.filter((l) => !paper.includes(l));
+  // mixed layers: a "paper" layer that also carries artwork would repaint
+  // its blobs OVER everything once forced to depth 0 — split it, keeping
+  // only the full-canvas gradient at the bottom and re-homing the rest
+  const paper: L[] = [];
+  const rest: L[] = [];
+  for (const l of content.filter(isPaperLayer)) {
+    const paperShapes = (l.shapes as any[]).filter(
+      (s) => s?.type === "gradient_fill" &&
+        Number(s?.x ?? 0) <= 1 && Number(s?.y ?? 0) <= 1 &&
+        Number(s?.w ?? 0) >= 1100 && Number(s?.h ?? 0) >= 1900);
+    const extra = (l.shapes as any[]).filter((s) => !paperShapes.includes(s));
+    paper.push({ ...l, shapes: paperShapes } as L);
+    if (extra.length)
+      rest.push({ ...l, id: `${l.id ?? "layer"}-art`, depth: 1, shapes: extra } as L);
+  }
+  rest.push(...content.filter((l) => !isPaperLayer(l)));
   rest.sort((a, b) => Number(a.depth ?? 0) - Number(b.depth ?? 0)); // stable
   const ordered = [...paper, ...rest, ...finishers];
   const n = ordered.length;
