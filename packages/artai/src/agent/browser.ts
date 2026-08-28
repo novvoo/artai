@@ -651,7 +651,10 @@ export class BrowserIntentProvider implements IntentProvider {
     const RUNGS: ReadonlyArray<{
       jsonl?: boolean; budget?: number; system: string; user: string;
     }> = [
-      { system: GRAPH_SYSTEM_PROMPT, user: objectUser, budget: 6048 },
+      // 16384 comfortably fits a dense 10–13 layer graph (the JSON runs
+      // 4–9k tokens); unused budget is never billed, so the only thing a
+      // generous cap changes is fewer pointless truncation retries
+      { system: GRAPH_SYSTEM_PROMPT, user: objectUser, budget: 16384 },
       { system: GRAPH_SYSTEM_PROMPT, user: objectUser,
         ...(this.anthropic() ? { budget: 32000 as const } : {}) },
       { jsonl: true, system: GRAPH_JSONL_SYSTEM_PROMPT,
