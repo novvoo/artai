@@ -193,6 +193,36 @@ export function compileStructuredPrompt(recipe: Recipe, plan: Plan, ir: SceneIR)
   if (!motifBlockDone)
     push("FOCAL EVENT", "One small isolated visual event embodying the theme relation.");
 
+  // ---- layer plan ----------------------------------------------------------
+  // The single biggest cause of "fewer than 10 layers" retries was that the
+  // brief described WHAT to draw (30+ fact sections) but never decomposed it
+  // INTO layers — the model had to invent the decomposition and parked at 8-9.
+  // The IR already knows the content; hand the composer an explicit plan.
+  {
+    const backdropCount = ir.ops.filter((o) => o.op === "backdrop").length;
+    const fillCount = ir.ops.filter((o) => o.op === "fill" || o.op === "hatch").length;
+    const chipCount = chipList.length;
+    const markCount = marksList.length;
+    const atmo = Math.min(3, Math.max(2, backdropCount || 2));
+    const ground = Math.min(3, Math.max(2, fillCount || 2));
+    const details = Math.min(3, Math.max(2, Math.ceil((chipCount + markCount) / 2) || 2));
+    const plan: string[] = [
+      "L1 paper base — ONE full-canvas gradient_fill, nothing else in the layer (depth 0)",
+      `L2..L${1 + atmo} atmosphere ×${atmo} — one wash gradient + one organic_blob mass + one long stroke_path each (depths 1..${atmo})`,
+      `L${2 + atmo}..L${1 + atmo + ground} ground/props ×${ground} — round_rect plates or environmental strokes + shading blobs, 3-4 shapes each (depths ${2 + atmo}..${1 + atmo + ground})`,
+      `L${2 + atmo + ground} focal subject — body (ellipse/round_rect) + closed silhouette (8-12 pts, first repeated last) + 2 interior strokes + 2-3 shading blobs (depth ${2 + atmo + ground + 1})`,
+      `then detail accents ×${details} — 2-3 small shapes each, scattered unevenly (depths up to 9)`,
+      "L final finisher — ONE layer holding only grain + vignette (depth 10)",
+    ];
+    const total = 1 + atmo + ground + 1 + details + 1;
+    push(
+      "LAYER PLAN (BINDING)",
+      `Author EXACTLY this layer sequence — ${total} content layers + 1 finisher, matching the composer's 10\u201313 requirement:\n` +
+        plan.map((l) => `\u2022 ${l}`).join("\n") +
+        "\nEvery layer above maps to one JSON layer object in the composition graph; do not merge or skip layers.",
+    );
+  }
+
   // ---- scale sanity --------------------------------------------------------
   push(
     "SCALE SANITY",

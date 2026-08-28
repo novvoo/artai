@@ -123,8 +123,8 @@ const AUTHORING_PROCESS = `AUTHORING PROCESS \u2014 think like an illustrator be
 6. FINISH: grain + vignette layers`;
 
 const LAYER_RULES = `Rules:
-\u2022 Create 10\u201313 layers organized by depth (0=background, 9=focal detail) \u2014 fewer reads as a sketch
-\u2022 3\u20135 shapes per layer (focal layer 6\u201310) \u2014 single-shape layers look empty
+\u2022 Create 10\u201313 layers organized by depth (0=background, 10=finisher) \u2014 graphs with fewer than 10 layers are AUTO-REJECTED and retried
+\u2022 3\u20135 shapes per layer (focal layer 6\u201310) \u2014 total shape count below 2.5\u00d7 the layer count is AUTO-REJECTED
 \u2022 Layer 0 must be a gradient_fill covering the full canvas (paper tone)
 \u2022 Add organic_blob layers for atmospheric/color masses behind the focal element
 \u2022 organic_blob harmonics control edge irregularity: 0.04\u20130.12 = gentle wash,
@@ -136,8 +136,17 @@ const LAYER_RULES = `Rules:
 \u2022 Coordinates in a 1200\u00d72000 space`;
 
 /** few-shot anchor: models imitate structure far better than they follow
- * adjectives — show what one properly-filled layer looks like */
-const DENSITY_EXAMPLE = `One well-filled midground layer (5 shapes):
+ * adjectives — a complete exemplar (structure, depth order, density, value
+ * range) removes most of the guessing that caused first-draft retries */
+const DENSITY_EXAMPLE = `REFERENCE SKELETON (structure to imitate — ${"{}"} marks where your content goes; do NOT copy this cup): a compliant graph has exactly this SHAPE:
+{"lightDeg":315}
+paper(0): 1 full-canvas gradient_fill  \u2192 depth 0
+3\u00d7 atmosphere(1-3): gradient_fill wash + organic_blob mass + long stroke_path, 3 shapes each  \u2192 depth 1..3
+2\u00d7 ground/props(4-5): round_rect plate + shading blobs, 3-4 shapes each  \u2192 depth 4..5
+focal(6-8): ellipse/round_rect body + closed silhouette (8-12 pts, first point repeated last) + 2 interior strokes + 2 shading blobs \u2192 depth 6..8
+details(8-9): 2-3 small accent layers, 2-3 shapes each
+finisher(10): one layer with ONLY grain + vignette
+One well-filled midground layer (5 shapes):
 {"id":"desk-plate","label":"desk surface","depth":4,"shapes":[
 {"type":"round_rect","x":140,"y":1180,"w":900,"h":420,"r":26,"fill":"#8a6f4d","alpha":0.5},
 {"type":"gradient_fill","x":160,"y":1200,"w":860,"h":380,"colorTop":"#a5865f","colorBottom":"#8a6f4d","alpha":0.35},

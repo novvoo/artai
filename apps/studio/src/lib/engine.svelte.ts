@@ -188,6 +188,9 @@ export interface HistoryEntry {
   thumb?: string | undefined;
   /** 配色 preset id the graph was authored against ("auto" = mood-driven) */
   palette?: string;
+  /** the realize() input seed of the run — restore must replay THIS seed,
+   * not a recomputed one, or the re-realized IR won't match the cached graph */
+  seed?: number;
 }
 
 const HISTORY_KEY = "artai.history.v1";
@@ -198,6 +201,13 @@ export function loadHistory(): HistoryEntry[] {
     const raw = localStorage.getItem(HISTORY_KEY);
     stored = raw ? (JSON.parse(raw) as HistoryEntry[]) : [];
   } catch { stored = []; }
+  // indexes written by older builds predate prompt/polishNotes — fill
+  // defaults so HistoryPanel can render every entry without crashing
+  stored = stored.map((h) => ({
+    ...h,
+    prompt: h.prompt ?? "",
+    polishNotes: Array.isArray(h.polishNotes) ? h.polishNotes : [],
+  }));
   // the index is a DIRECTORY over the actual caches — entries written before
   // this feature existed (or on another tab) are rebuilt from localStorage
   try {
@@ -297,6 +307,8 @@ class Engine {
      "\u7f16\u8bd1\u573a\u666f", "\u8d28\u91cf\u95e8\u7981", "\u6e32\u67d3"];
   private salt = 0;
   private lastTheme = "";
+  /** realize() input seed of the most recent generate() — recorded into history */
+  private lastSeed = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   /** abort the in-flight run: fetches die mid-flight, checkpoints unwind.
@@ -350,6 +362,7 @@ class Engine {
       model,
       at: Date.now(),
       palette: paletteSel.id,
+      seed: this.lastSeed,
       layers: this.graph.layers.length,
       shapes: this.graph.layers.reduce(
         (a: number, l: any) => a + (l.shapes?.length ?? 0), 0),
@@ -389,9 +402,10 @@ class Engine {
     this.pushLog(`⏪ 恢复历史：${theme}（${hit.layers.length} 层）`);
     try {
       const { graphToScript } = await import("artai/core");
-      // recompute the deterministic seed for this theme (same formula as
-      // generate; salt=0 keeps it stable per theme)
-      const seed = ((this.baseSeed + 1) * 7919) >>> 0;
+      // replay the EXACT seed the run used (falls back to the salt=0 formula
+      // for entries recorded before seeds were tracked)
+      const seed = entry.seed ?? (((this.baseSeed + 1) * 7919) >>> 0);
+      this.lastSeed = seed;
 
       // rebuild a minimal envelope: reuse the live intent/realize caches so
       // the palette/IR/chrome come back exactly as they were
@@ -510,6 +524,7 @@ class Engine {
     try {
       this.salt++;
       const seed = ((this.baseSeed + 1) * 7919 + this.salt * 104729) >>> 0;
+      this.lastSeed = seed;
 
       const draftKey = await genHash(t, "intent:v1");
       let draft: IntentDraft;
@@ -652,9 +667,13 @@ class Engine {
         this.pushLog(`✗ ${this.error}`);
         this.pngUrl = null;
       }
-      clearInterval(this.timer!); this.timer = null; this.busy = false;
+    } finally {
+      clearInterval(this.timer!); this.timer = null;
+      this.busy = false;
       this.stopping = false;
       this.runCtrl = null;
+      // success-only: a completed run never enters catch, so the done-label
+      // and history record can only happen here
       if (!this.error && !signal.aborted) {
         this.stageIndex = 6; this.stageLabelZh = "done";
         this.pushLog(`✓ 完成，耗时 ${Math.round((Date.now() - t0) / 100) / 10}s`);
