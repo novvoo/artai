@@ -151,6 +151,8 @@ class Engine {
   /** true after the user pressed 停止 and the run is unwinding */
   stopping = $state(false);
   private runCtrl: AbortController | null = null;
+  /** user's own polish suggestion (继续打磨的附加 prompt) */
+  polishNote = $state("");
   /** floating windows: activity log + full-size poster lightbox */
   logOpen = $state(false);
   lightbox = $state<string | null>(null);
@@ -412,7 +414,7 @@ class Engine {
       const seedUsed = Number(env.meta?.seedUsed ?? 1);
       const complaints = critiqueGraph(this.graph as any);
       this.logOpen = true;
-      this.pushLog(`▶ 继续打磨 · 审计当前终稿：${complaints.length ? `${complaints.length} 项问题 — ${complaints.join("; ")}` : "无硬伤，执行提升级打磨"}`);
+      this.pushLog(`▶ 继续打磨 · 审计当前终稿：${complaints.length ? `${complaints.length} 项问题 — ${complaints.join("; ")}` : "无硬伤，执行提升级打磨"}${this.polishNote.trim() ? ` · 用户建议：「${this.polishNote.trim()}」` : ""}`);
       const graph = await bpInstance().composeGraph({
         fullSpec: String(this.fullSpec ?? ""),
         paletteHexes: paletteOf(env),
@@ -423,6 +425,9 @@ class Engine {
           }),
           complaints,
         },
+        ...(this.polishNote.trim()
+          ? { userNote: this.polishNote.trim() }
+          : {}),
         onDelta: (chunk) => { this.graphStreamText += chunk; },
         onStatus: (label) => {
           // each polish round is a fresh draft — clear the stale stream

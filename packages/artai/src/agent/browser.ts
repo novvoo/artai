@@ -658,6 +658,9 @@ export class BrowserIntentProvider implements IntentProvider {
      * studio's 继续打磨 button): complaints empty ⇒ a generic elevation
      * brief is used instead */
     previousGraph?: { graphJson: string; complaints?: string[] };
+    /** the user's own polish suggestion — injected into the patch prompt
+     * as high-priority guidance (e.g. "把主体移到左下，加一只猫") */
+    userNote?: string;
   }): Promise<import("../core/scene/graph.js").CompositionGraph> {
     const { GRAPH_SYSTEM_PROMPT, GRAPH_JSONL_SYSTEM_PROMPT,
             buildGraphUserPrompt, buildGraphJsonlUserPrompt, critiqueGraph } =
@@ -730,6 +733,9 @@ export class BrowserIntentProvider implements IntentProvider {
           "\n\n=== PREVIOUS GRAPH ===\n" + revision.graphJson +
           "\n\n=== ART-DIRECTOR COMPLAINTS (fix every one; it verified the graph, not blessed it) ===" +
           revision.complaints.split("; ").map((c) => `\n\u2022 ${c}`).join("") +
+          (input.userNote?.trim()
+            ? `\n\n=== USER GUIDANCE (the user's explicit request \u2014 honor it as top priority, unless it violates the layer-order/density rules above) ===\n\u2022 ${input.userNote.trim()}`
+            : "") +
           "\n\n=== PATCH FORMAT (CRITICAL \u2014 keeps the revision fast) ===" +
           (revision.complaints.includes("ELEVATE")
             ? "\n\u2022 ELEVATE brief: improve the composition with targeted patches \u2014 keep the overall composition and palette"

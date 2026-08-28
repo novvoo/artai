@@ -235,6 +235,7 @@ describe("composeGraph quality-revision loop", () => {
     const statuses: string[] = [];
     const out = await bp.composeGraph({
       fullSpec: "brief", paletteHexes: ["#d8412f", "#26241f", "#e9e0cc"], theme: "t",
+      userNote: "把主体移到左下，加一只猫",
       onStatus: (s) => statuses.push(s),
     });
     expect(call).toBe(2);
@@ -245,6 +246,8 @@ describe("composeGraph quality-revision loop", () => {
     expect(revPrompt).toContain("PATCHING");
     expect(revPrompt).toContain("PREVIOUS GRAPH");
     expect(revPrompt).toContain("PATCH FORMAT");
+    expect(revPrompt).toContain("USER GUIDANCE");
+    expect(revPrompt).toContain("把主体移到左下，加一只猫");
     expect(revPrompt).toMatch(/wireframe-only|dead center/);
     // the patch merged into the previous graph: unchanged layers survive,
     // the broken focal layer was replaced — still 11 layers

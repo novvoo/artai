@@ -294,6 +294,12 @@
 
     <div class="actions hairline-top">
       {#if engine.graph && !engine.graphFailed}
+        <input
+          class="polish-note"
+          placeholder="打磨建议（可选）：例如「把主体移到左下」「加一只猫」"
+          bind:value={engine.polishNote}
+          onkeydown={(e) => { if (e.key === "Enter" && !engine.busy) void engine.polish(); }}
+        />
         <button
           class="polish"
           onclick={() => void engine.polish()}
@@ -346,7 +352,16 @@ section { min-height: 420px; }
 .actions { padding-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 .actions button { background: none; border: 1px solid var(--hairline); padding: 7px 14px; cursor: pointer; letter-spacing: .08em; }
 .actions button:hover { border-color: var(--accent); }
-.actions .polish { border-color: var(--accent); color: var(--accent); }
+  .polish-note {
+    flex: 1 1 240px;
+    border: 1px solid var(--hairline);
+    background: none;
+    padding: 7px 12px;
+    font-size: 12px;
+    color: var(--ink, #26241f);
+  }
+  .polish-note:focus { outline: none; border-color: var(--accent, #d8412f); }
+  .actions .polish { border-color: var(--accent); color: var(--accent); }
 .actions .polish:hover { background: rgba(216,65,47,.06); }
 .actions button:disabled { opacity: .5; cursor: default; }
 .actions button:disabled:hover { border-color: var(--hairline); }
