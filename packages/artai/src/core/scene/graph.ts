@@ -115,12 +115,13 @@ const SHAPES_VOCAB = `Each shape is one of:
 - {"type":"grain","density":n}`;
 
 const AUTHORING_PROCESS = `AUTHORING PROCESS \u2014 think like an illustrator before writing JSON:
-1. PLACE: the focal object sits on a rule-of-thirds intersection, roughly 45\u201365% down the canvas \u2014 never dead center, never clipped by margins
-2. LIGHT: lightDeg is the light angle. Shading blobs and shadow masses go on the OPPOSITE side of the focal object; rim highlights on the lit side
-3. VALUES: block 3\u20134 big value masses first (paper, one mid wash, one dark accent) \u2014 one dominant, one secondary, small accents; generous empty paper is GOOD
-4. BUILD the focal object: ellipse / round_rect body fills first, then a CLOSED stroke_path silhouette (8\u201312 points tracing the true outline, first point repeated last \u2014 closed contours get a soft body fill), then 2\u20133 interior structure strokes and 2\u20133 organic_blob shading patches (alpha 0.15\u20130.35) for volume
-5. DETAIL: small accents (stains, ticks, speckles) scattered unevenly near the focal element
-6. FINISH: grain + vignette layers`;
+1. DEPTH = VIEWER DISTANCE: depth is paint order AND occlusion \u2014 where two elements overlap, the one NEARER the viewer gets the HIGHER depth. A platform edge / table front / window frame occludes whatever lies beyond it (rails, floor, skyline); the focal subject occludes its backdrop. Getting this backwards puts far-away rails IN FRONT of near objects
+2. PLACE: the focal object sits on a rule-of-thirds intersection, roughly 45\u201365% down the canvas \u2014 never dead center, never clipped by margins
+3. LIGHT: lightDeg is the light angle. Shading blobs and shadow masses go on the OPPOSITE side of the focal object; rim highlights on the lit side
+4. VALUES: block 3\u20134 big value masses first (paper, one mid wash, one dark accent) \u2014 one dominant, one secondary, small accents; generous empty paper is GOOD
+5. BUILD the focal object: ellipse / round_rect body fills first, then a CLOSED stroke_path silhouette (8\u201312 points tracing the true outline, first point repeated last \u2014 closed contours get a soft body fill), then 2\u20133 interior structure strokes and 2\u20133 organic_blob shading patches (alpha 0.15\u20130.35) for volume
+6. DETAIL: small accents (stains, ticks, speckles) scattered unevenly near the focal element
+7. FINISH: grain + vignette layers`;
 
 const LAYER_RULES = `Rules:
 \u2022 Create 10\u201313 layers organized by depth (0=background, 10=finisher) \u2014 graphs with fewer than 10 layers are AUTO-REJECTED and retried

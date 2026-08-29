@@ -223,6 +223,28 @@ export function compileStructuredPrompt(recipe: Recipe, plan: Plan, ir: SceneIR)
     );
   }
 
+  // ---- scene rig (2.5D scaffold) -------------------------------------------
+  // Trains float above rails and roads bend randomly because every shape is
+  // authored blind and independently. A shared rig — horizon, vanishing
+  // point, ground band — gives all receding/grounded elements one geometry
+  // without a 3D engine. Coordinates are BINDING.
+  {
+    const rigVariant = (recipe.seed + String(recipe.layout.family).length) % 3;
+    const horizonY = Math.round(H * (0.36 + rigVariant * 0.035));
+    const vpX = Math.round(W * (0.42 + rigVariant * 0.08));
+    const groundTop = Math.round(H * (0.55 + rigVariant * 0.03));
+    const groundBottom = Math.round(H - H * 0.07);
+    push(
+      "SCENE RIG (BINDING)",
+      `Shared 2.5D scaffold for this sheet — every grounded or receding element MUST obey it:\n` +
+        `\u2022 HORIZON line at y=${horizonY} (eye level; nothing behind it dips below it)\n` +
+        `\u2022 VANISHING POINT at (${vpX}, ${horizonY}) \u2014 ALL receding linear elements (rails, tracks, roads, platform edges, rows of sleepers) aim at this exact point; their two rails converge toward it, never parallel to the picture plane\n` +
+        `\u2022 GROUND BAND y ${groundTop}\u2013${groundBottom} \u2014 the contact line of every standing object (train wheels, cup base, chair legs) lands INSIDE this band; wheels touch their rail, nothing hovers\n` +
+        `\u2022 ORIENTATION: vehicles standing on a track are aligned WITH the track direction (their long axis points at the vanishing point when seen at an angle, or sits parallel beneath the horizon in flat side view)\n` +
+        `\u2022 The focal event sits in front of the rig, between the ground band and the horizon zone.`,
+    );
+  }
+
   // ---- scale sanity --------------------------------------------------------
   push(
     "SCALE SANITY",
