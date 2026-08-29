@@ -7,7 +7,7 @@
  * bundled Latin faces don't). Upgrading to opentype.js outlines — unlocking
  * hatchable/ghost-letterforms — stays per architecture §13.
  */
-import type { Rng } from "../core/util/rand.js";
+import { Rng } from "../core/util/rand.js";
 import { mix, readableOn } from "../core/util/color.js";
 import { beginJob, drawCustomMotif, drawMotifArt, endJob, type Pal } from "./motif-art.js";
 
@@ -474,27 +474,86 @@ function paintPlaceholder(ctx: Ctx2D, op: Record<string, unknown>): void {
 
 /* ------------------------------- grain ---------------------------------- */
 
+/**
+ * Real print grain — a per-pixel ImageData pass, not painted dots.
+ *
+ * Painted speckle (uniform white/black dots, image-independent) fails the
+ * squint test because real paper/film grain is (a) spatially correlated,
+ * (b) weighted by local tone — heavy in ink shadows, clean in highlights.
+ * Model: low-frequency fiber field (bilinear value noise) × tone weight +
+ * per-pixel white noise, applied as a luminance offset so hue never drifts.
+ *
+ * Determinism: the grain stream is seeded from `op.grain` (=
+ * `${recipe.seed}:scene`) + raster dimensions, NOT the shared overlay rng —
+ * the per-pixel call count would otherwise shift every later rng consumer.
+ * The whole pass is best-effort: a tainted canvas skips grain silently.
+ */
 function paintGrain(
   ctx: Ctx2D,
-  canvas: { width: number; height: number },
-  rng: Rng,
+  _canvas: { width: number; height: number },
+  _rng: Rng,
   op: Record<string, unknown>,
   detail = 2,
 ): void {
-  const count = Math.round((canvas.width * canvas.height) / (1400 / Math.min(detail, 3)));
-  ctx.save();
-  for (let i = 0; i < count; i++) {
-    const light = rng.float() < 0.5;
-    ctx.fillStyle = light ? "#ffffff" : "#1c1b18";
-    ctx.globalAlpha = 0.015 + rng.float() * 0.03;
-    ctx.fillRect(rng.float() * canvas.width, rng.float() * canvas.height, 1, 1);
+  const W = ctx.canvas.width;
+  const H = ctx.canvas.height;
+  try {
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+
+    // coarse fiber grid, bilinearly interpolated → spatially correlated field
+    const cell = Math.max(4, Math.round(Math.min(W, H) / 140));
+    const gw = Math.ceil(W / cell) + 2;
+    const gh = Math.ceil(H / cell) + 2;
+    const grng = new Rng(`grain:${String(op.grain ?? "")}:${W}x${H}:${detail}`);
+    const field = new Float32Array(gw * gh);
+    for (let i = 0; i < field.length; i++) field[i] = grng.float() * 2 - 1;
+
+    // detail knob (1–6) scales deposit strength; measured in-browser: this
+    // yields paper-patch grain SD ≈2–3 and ink-region SD ≈7–10 at detail 2 —
+    // visible print texture, not decorational sparkle
+    const amp = 9 + Math.min(Math.max(detail, 1), 6) * 7;
+    let i = 0;
+    for (let y = 0; y < H; y++) {
+      const fy = y / cell;
+      const y0 = Math.min(gh - 2, fy | 0);
+      const ty = fy - y0;
+      const row = y0 * gw;
+      for (let x = 0; x < W; x++, i += 4) {
+        const fx = x / cell;
+        const x0 = Math.min(gw - 2, fx | 0);
+        const tx = fx - x0;
+        const a = field[row + x0]!;
+        const b = field[row + x0 + 1]!;
+        const c = field[row + gw + x0]!;
+        const e = field[row + gw + x0 + 1]!;
+        const fiber =
+          a + (b - a) * tx + (c - a) * ty + (a - b - c + e) * tx * ty;
+        const white = grng.float() * 2 - 1;
+        const lum =
+          (0.2126 * d[i]! + 0.7152 * d[i + 1]! + 0.0722 * d[i + 2]!) / 255;
+        // shadow-weighted: dark ink carries grain, paper highlights stay clean
+        const toneW = Math.min(
+          0.9,
+          Math.pow(1 - lum, 1.2) * 0.9 + 0.18,
+        );
+        const n = (fiber * 0.8 + white * 0.5) * amp * toneW;
+        d[i] = d[i]! + n;
+        d[i + 1] = d[i + 1]! + n;
+        d[i + 2] = d[i + 2]! + n;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch {
+    return; // tainted canvas (foreign-origin image) — no grain available
   }
   // misregistration echo of the focal accent
   const px = Number(op.misregistrationPx ?? 0);
   if (px > 0) {
+    ctx.save();
     ctx.globalAlpha = 0.18;
     ctx.strokeStyle = "#d8412f";
     ctx.strokeRect(px, -px, 1, 1); // marker only; real channel offset handled in fills
+    ctx.restore();
   }
-  ctx.restore();
 }

@@ -4,11 +4,12 @@ import * as artai from "artai";
 import { BrowserIntentProvider } from "artai/agent";
 import {
   ACCENT_HUES,
-  PAPER_TONES,
   companionHue,
   shade,
   tint,
   compileStructuredPrompt,
+  paletteFromPixels,
+  paperToneHex,
 } from "artai/core";
 import type { IntentDraft } from "artai/core";
 
@@ -108,6 +109,8 @@ export interface PalettePreset {
   label: string;
   /** user-locked accent hex; omit = the model's mood steers chromatics */
   accent?: string;
+  /** companion hue measured from an original image (display only) */
+  accent2?: string;
   /** user-locked paper tone hex paired with the accent */
   paper?: string;
 }
@@ -128,13 +131,73 @@ export const paletteSel = $state<{ id: string }>(
 );
 export function setPalette(id: string): void {
   paletteSel.id = id;
+  // an explicit preset click supersedes image-derived colors
+  imagePaletteState.current = null;
   sv("artai.palette.v1", { id });
 }
 /** the locked preset, or undefined when 自動 lets the mood roll decide */
 export function activePalette(): PalettePreset | undefined {
+  if (imagePaletteState.current) return imagePaletteState.current;
   const p = PALETTES.find((x) => x.id === paletteSel.id);
   return p?.accent ? p : undefined;
 }
+
+/* ============ 原始图片输入模式（image-palette override） ============ */
+/** Palette measured from a user-supplied original image (paletteFromPixels).
+ * Takes priority over the 配色 preset until the user picks a preset again.
+ * Object wrapper: module-level $state must be mutated in place, never
+ * reassigned across the module boundary. */
+export const imagePaletteState = $state<{ current: PalettePreset | null }>({
+  current: null,
+});
+/** image:<accent>:<paper> tag — cache scope + history identity for a run
+ * driven by an extracted palette (restore replays the hexes, no re-decode) */
+function imagePaletteTag(p: PalettePreset): string {
+  return `image:${p.accent}:${p.paper}`;
+}
+
+/** decode an uploaded original image → measured palette → locked override */
+export async function applyImagePaletteFromFile(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result));
+    fr.onerror = () => rej(new Error("读取图片文件失败"));
+    fr.readAsDataURL(file);
+  });
+  const img = new Image();
+  await new Promise<void>((res, rej) => {
+    img.onload = () => res();
+    img.onerror = () => rej(new Error("图片解码失败（仅支持常见位图格式）"));
+    img.src = dataUrl;
+  });
+  // downscale into a ≤220px sampling canvas — the palette only needs
+  // statistics, and the demo contract is honored: pixels from the REAL image
+  const maxSide = 220;
+  const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * scale));
+  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("Canvas2D 不可用，无法解析图片");
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h);
+  const pal = paletteFromPixels(data.data, w, h);
+  imagePaletteState.current = {
+    id: "image",
+    label: "图片取色",
+    accent: pal.accent,
+    accent2: pal.accent2,
+    paper: pal.paper,
+  };
+  return `accent ${pal.accent} · paper ${pal.paper} · 对比度 ${pal.stats.contrast.toFixed(2)}`;
+}
+
+/** re-apply an extracted palette from stored hexes (history restore) */
+export function applyImagePaletteHexes(accent: string, paper: string): void {
+  imagePaletteState.current = { id: "image", label: "图片取色", accent, paper };
+}
+export function clearImagePalette(): void { imagePaletteState.current = null; }
 
 /* ============ cache module (three-phase gen cache) ============ */
 
@@ -341,7 +404,12 @@ class Engine {
   /** the graph cache key for the current theme + palette selection */
   private async graphCacheKey(): Promise<string> {
     const pal = activePalette();
-    return "graph." + await genHash(this.theme.trim(), "graph:v1", pal ? pal.id : "");
+    // image-derived palettes scope by their measured hexes: two different
+    // source images must never share a cached composition
+    const scope = pal
+      ? (pal.id === "image" ? imagePaletteTag(pal) : pal.id)
+      : "";
+    return "graph." + await genHash(this.theme.trim(), "graph:v1", scope);
   }
 
   /** upsert a run into the history index after a successful poster render */
@@ -361,7 +429,7 @@ class Engine {
       polishNotes: notes,
       model,
       at: Date.now(),
-      palette: paletteSel.id,
+      palette: paletteTagForHistory(),
       seed: this.lastSeed,
       layers: this.graph.layers.length,
       shapes: this.graph.layers.reduce(
@@ -393,8 +461,17 @@ class Engine {
     this.theme = theme;
     this.lastTheme = theme;
     // re-lock the 配色 the graph was authored against so the re-realized
-    // IR (paper tone, accent panels) matches the cached composition
-    setPalette(entry.palette ?? "auto");
+    // IR (paper tone, accent panels) matches the cached composition.
+    // image:<accent>:<paper> tags replay the measured hexes without a re-decode
+    const tag = entry.palette ?? "auto";
+    if (tag.startsWith("image:")) {
+      const [, accent, paper] = tag.split(":");
+      if (accent && paper) applyImagePaletteHexes(accent, paper);
+      else { clearImagePalette(); setPalette("auto"); }
+    } else {
+      clearImagePalette();
+      setPalette(tag);
+    }
     this.busy = true;
     this.error = "";
     this.stageIndex = 6;
@@ -799,6 +876,14 @@ function realizeOverrides(): { accent?: string; paperTone?: string } {
   return p.paper ? { accent: p.accent, paperTone: p.paper } : { accent: p.accent };
 }
 
+/** history identity of the active palette: preset id, or the measured
+ * image:<accent>:<paper> tag so a restore can re-lock the exact hexes */
+function paletteTagForHistory(): string {
+  const p = activePalette();
+  if (!p) return "auto";
+  return p.id === "image" ? imagePaletteTag(p) : p.id;
+}
+
 /** palette hexes handed to the LLM as the locked color set for the graph */
 function paletteOf(env: any): string[] {
   const c = env?.recipe?.color ?? {};
@@ -813,7 +898,7 @@ function paletteOf(env: any): string[] {
   // what will actually be painted (paper tone + shaded deep + washed panels
   // + the mood's companion hue for two-ink motifs)
   const accent = String(c.hue ?? "#d8412f");
-  const paper = String(PAPER_TONES[env?.recipe?.canvas?.paperTone] ?? "#F5F0E6");
+  const paper = String(paperToneHex(String(env?.recipe?.canvas?.paperTone ?? "")));
   const companion = String(
     ACCENT_HUES[companionHue(String(env?.recipe?.mood ?? ""), String(c.name ?? ""))] ?? "#1B4FD8");
   return [accent, shade(accent, 0.38), tint(accent, 0.74), paper, companion];

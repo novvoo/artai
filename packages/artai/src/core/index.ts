@@ -34,6 +34,7 @@ export {
 export { checkCore, type Violation, type ViolationCode } from "./gate/checks-core.js";
 export { checkBatch, repairBatch, type BatchViolation } from "./recipe/constraints.js";
 export { pickRecipe, ALL_FAMILIES, PHOTO_FORMS, companionHue } from "./recipe/variation.js";
+export { paletteFromPixels, type ImagePalette, type ImagePaletteStats } from "./recipe/imagePalette.js";
 export { mix, tint, shade, collagePalette } from "./util/color.js";
 export {
   RecipeSchema,
@@ -52,6 +53,7 @@ export {
   MARK_KINDS,
   MOODS,
   PAPER_TONES,
+  paperToneHex,
   ACCENT_HUES,
   type Recipe,
   type IntentDraft,

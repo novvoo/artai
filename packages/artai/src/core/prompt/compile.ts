@@ -8,7 +8,7 @@
  *  - stay exactly four paragraphs (skill contract, tested).
  */
 import type { Recipe } from "../types/recipe.js";
-import { PAPER_TONES } from "../types/recipe.js";
+import { paperToneHex } from "../types/recipe.js";
 import type { Plan } from "../layout/solver.js";
 import type { SceneIR } from "../scene/compile.js";
 import { MOTIF_STAGING, type MotifId } from "../recipe/motifs.js";
@@ -98,7 +98,7 @@ export interface CompileExtras {
 
 export function compilePrompt(recipe: Recipe, plan: Plan, ir?: SceneIR): string {
   const pct = (v: number): string => `${Math.round(v * 100)}%`;
-  const toneHex = PAPER_TONES[recipe.canvas.paperTone] ?? "#f5f0e6";
+  const toneHex = paperToneHex(recipe.canvas.paperTone);
   const motifOp = ir?.ops.find((o) => o.op === "motif") as
     | { edge?: string } | undefined;
 

@@ -6,7 +6,7 @@
  * generators and human reading.
  */
 import type { Recipe } from "../types/recipe.js";
-import { PAPER_TONES } from "../types/recipe.js";
+import { paperToneHex } from "../types/recipe.js";
 import type { Plan } from "../layout/solver.js";
 import type { SceneIR } from "../scene/compile.js";
 import { lightPhrase } from "./compile.js";
@@ -17,7 +17,7 @@ const px = (v: number, max: number): number => Math.round((v / max) * 100);
 export function compileStructuredPrompt(recipe: Recipe, plan: Plan, ir: SceneIR): string {
   const W = ir.canvas.width;
   const H = ir.canvas.height;
-  const toneHex = PAPER_TONES[recipe.canvas.paperTone] ?? "#f5f0e6";
+  const toneHex = paperToneHex(recipe.canvas.paperTone);
   const sections: string[] = [];
   const push = (label: string, body: string): void => {
     sections.push(`[${label}]\n${body}`);

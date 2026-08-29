@@ -3,7 +3,7 @@
  * The IR is the fold target of both backends; ops are ordered draw intents.
  */
 import type { Recipe } from "../types/recipe.js";
-import { PAPER_TONES } from "../types/recipe.js";
+import { paperToneHex } from "../types/recipe.js";
 import type { Plan } from "../layout/solver.js";
 import { MOTIF_STAGING } from "../recipe/motifs.js";
 import { mix, shade, tint, DEFAULT_PAPER_HEX } from "../util/color.js";
@@ -67,7 +67,7 @@ export interface SceneIR {
 
 export function compileScene(recipe: Recipe, plan: Plan): SceneIR {
   const p = plan.placement;
-  const tone = PAPER_TONES[recipe.canvas.paperTone] ?? PAPER_TONES["warm-white"]!;
+  const tone = paperToneHex(recipe.canvas.paperTone);
   const seedRng = `${recipe.seed}:scene`;
 
   const ops: SceneOp[] = [];

@@ -119,6 +119,16 @@ export const PAPER_TONES: Record<string, string> = {
 };
 export type PaperToneKey = keyof typeof PAPER_TONES;
 
+/** Resolve canvas.paperTone — a PAPER_TONES key OR a raw hex (the studio
+ * 配色 presets and the image-palette mode lock literal hexes). Hexes pass
+ * through unchanged so a user-measured tone is never silently replaced by
+ * the warm-white fallback. */
+export function paperToneHex(paperTone: string): string {
+  const v = PAPER_TONES[paperTone];
+  if (v) return v;
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(paperTone) ? paperTone : PAPER_TONES["warm-white"]!;
+}
+
 export const ACCENT_HUES: Record<string, string> = {
   cobalt: "#1B4FD8",
   ultramarine: "#2743C6",

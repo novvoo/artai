@@ -17,10 +17,14 @@
     paletteSel,
     setPalette,
     activePalette,
+    imagePaletteState,
+    applyImagePaletteFromFile,
+    clearImagePalette,
   } from "../lib/engine.svelte.js";
   import { shade } from "artai/core";
 
   let cacheN = $state(cacheCount());
+  let imgNote = $state("");
   function toggleCache(on: boolean): void {
     setUseCache(on);
     if (on) cacheN = cacheCount();
@@ -28,6 +32,19 @@
   function wipeCache(): void {
     clearGenerationCache();
     cacheN = 0;
+  }
+
+  async function pickImage(e: Event): Promise<void> {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ""; // allow re-picking the same file
+    if (!file) return;
+    imgNote = "解析中…";
+    try {
+      imgNote = await applyImagePaletteFromFile(file);
+    } catch (err) {
+      imgNote = err instanceof Error ? err.message : String(err);
+    }
   }
 
   function rollSeed(): void {
@@ -40,6 +57,22 @@
   <textarea id="theme" rows="3" bind:value={engine.theme}></textarea>
 
   <span id="palette-label">PALETTE</span>
+  <div class="img-palette-row">
+    <label class="img-btn">
+      <input type="file" accept="image/*" onchange={pickImage} />
+      原始图片取色…
+    </label>
+    {#if imagePaletteState.current}
+      <span class="chip" title={`从图片实测：accent ${imagePaletteState.current.accent} · paper ${imagePaletteState.current.paper}`}>
+        <i style={`background:${shade(imagePaletteState.current.accent, 0.38)}`}></i>
+        <i class="wide" style={`background:${imagePaletteState.current.accent}`}></i>
+        <i style={`background:${imagePaletteState.current.paper}`}></i>
+      </span>
+      <span class="img-note">{imgNote || `${imagePaletteState.current.accent} · ${imagePaletteState.current.paper}`}</span>
+      <button class="img-clear" onclick={() => { clearImagePalette(); imgNote = ""; }}
+        title="清除图片取色，回到配色预设">✕</button>
+    {/if}
+  </div>
   <div class="palette-grid" role="radiogroup" aria-labelledby="palette-label">
     {#each PALETTES as p (p.id)}
       <button
@@ -151,6 +184,45 @@
     border: 1px solid var(--hairline);
     padding: 10px;
     resize: vertical;
+  }
+  .img-palette-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: -6px;
+  }
+  .img-btn {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
+    border: 1px dashed var(--hairline);
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  .img-btn:hover {
+    border-color: var(--ink-soft);
+    color: var(--ink);
+  }
+  .img-btn input {
+    display: none;
+  }
+  .img-note {
+    font-size: 10px;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+  }
+  .img-clear {
+    background: none;
+    border: 1px solid var(--hairline);
+    color: var(--ink-soft);
+    font-size: 11px;
+    padding: 1px 7px;
+    cursor: pointer;
+  }
+  .img-clear:hover {
+    border-color: #a33c1d;
+    color: #a33c1d;
   }
   .palette-grid {
     display: flex;
