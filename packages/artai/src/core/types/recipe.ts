@@ -215,6 +215,9 @@ export const RecipeSchema = z.object({
       role: PhotoRoleSchema,
       preservation: PreservationLevelSchema,
       invariants: z.array(z.string()),
+      /** render-asset id — resolved to real pixels by the rasterizer's asset
+       * registry (photoFragment). Core only carries the opaque id. */
+      assetId: z.string().optional(),
     })
     .optional(),
   visual: z

@@ -10,6 +10,8 @@
  */
 export { rasterizeCanvas } from "./raster-canvas.js";
 export { brushAvailable, rasterizeBrush } from "./raster-p5.js";
+export { registerAsset, getAsset, hasAsset, clearAssets } from "./assets.js";
+export { degradePhotoPixels, treatmentToDegrade } from "./photoTone.js";
 import { rasterizeCanvas } from "./raster-canvas.js";
 import { brushAvailable, rasterizeBrush } from "./raster-p5.js";
 import { drawGraphToCtx } from "../core/scene/graphRender.js";
@@ -141,7 +143,19 @@ export function overlayAvoidSubject(
   graph: { layers?: Array<Record<string, unknown>> },
   ir: Record<string, unknown>,
 ): Record<string, unknown> {
-  const subject = graphSubjectBox(graph);
+  let subject = graphSubjectBox(graph);
+  // 写实 mode: the photoFragment IS the subject — overlay text must avoid it
+  // even when the graph's painted layers sit elsewhere
+  for (const op of ((ir.ops ?? []) as Array<Record<string, unknown>>)) {
+    if (op.op !== "photoFragment" || !op.asset) continue;
+    const [bx, by, bw, bh] = (op.box as [number, number, number, number]) ?? [0, 0, 0, 0];
+    subject = subject
+      ? {
+          x0: Math.min(subject.x0, bx), y0: Math.min(subject.y0, by),
+          x1: Math.max(subject.x1, bx + bw), y1: Math.max(subject.y1, by + bh),
+        }
+      : { x0: bx, y0: by, x1: bx + bw, y1: by + bh };
+  }
   if (!subject) return ir;
   const W = Number((ir.canvas as Record<string, unknown>)?.width ?? 1200);
   const H = Number((ir.canvas as Record<string, unknown>)?.height ?? 2000);

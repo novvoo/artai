@@ -364,6 +364,7 @@ interface CritiqueLayer {
  */
 export function critiqueGraph(
   graph: { lightDeg?: number | undefined; layers?: CritiqueLayer[] },
+  opts?: { reservedBoxes?: Array<{ x0: number; y0: number; x1: number; y1: number }> },
 ): string[] {
   const issues: string[] = [];
   const layers = Array.isArray(graph.layers) ? graph.layers : [];
@@ -723,6 +724,34 @@ export function critiqueGraph(
       issues.push(
         "focal mass is dead center \u2014 shift to a rule-of-thirds intersection",
       );
+  }
+
+  // V10. reserved photo box: shapes squatting on the photo fragment rect —
+  //      the REAL photo is pasted there and will cover them (写实 mode)
+  for (const box of opts?.reservedBoxes ?? []) {
+    const squatter = layers.some((l) =>
+      (l.shapes ?? []).some((s) => {
+        if (s?.type !== "ellipse" && s?.type !== "round_rect" && s?.type !== "organic_blob")
+          return false;
+        const sx = s.type === "ellipse" ? Number(s.cx) - Number(s.rx)
+          : s.type === "round_rect" ? Number(s.x)
+          : Number(s.cx) - Number(s.rBase);
+        const sy = s.type === "ellipse" ? Number(s.cy) - Number(s.ry)
+          : s.type === "round_rect" ? Number(s.y)
+          : Number(s.cy) - Number(s.rBase);
+        const sw = s.type === "round_rect" ? Number(s.w) : (s.type === "ellipse" ? 2 * Number(s.rx) : 2 * Number(s.rBase));
+        const sh = s.type === "round_rect" ? Number(s.h) : (s.type === "ellipse" ? 2 * Number(s.ry) : 2 * Number(s.rBase));
+        if (![sx, sy, sw, sh].every(Number.isFinite) || sw <= 0 || sh <= 0) return false;
+        const ix = Math.max(0, Math.min(box.x1, sx + sw) - Math.max(box.x0, sx));
+        const iy = Math.max(0, Math.min(box.y1, sy + sh) - Math.max(box.y0, sy));
+        return (ix * iy) / (sw * sh) > 0.55; // shape mostly inside the photo box
+      }));
+    if (squatter) {
+      issues.push(
+        `shapes occupy the reserved photo fragment rect (${Math.round(box.x0)},${Math.round(box.y0)})–(${Math.round(box.x1)},${Math.round(box.y1)}) — the REAL photograph is pasted there on top and will cover them; compose AROUND the rect: atmosphere, ground plane, props, contact shadow at its bottom edge`,
+      );
+      break;
+    }
   }
 
   return issues.slice(0, 7);

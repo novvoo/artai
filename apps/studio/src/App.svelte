@@ -87,6 +87,10 @@
     max-width: 980px;
     margin: 0 auto;
     padding: 24px;
+    /* respect the iPhone home indicator + browser chrome */
+    padding-left: max(24px, env(safe-area-inset-left));
+    padding-right: max(24px, env(safe-area-inset-right));
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
   }
   header {
     display: flex;
@@ -95,6 +99,7 @@
     gap: 16px;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--hairline);
+    flex-wrap: wrap;
   }
   .brand {
     letter-spacing: 0.14em;
@@ -132,10 +137,20 @@
     grid-template-columns: minmax(300px, 380px) 1fr;
     gap: 32px;
     margin-top: 22px;
+    align-items: start;
+  }
+  /* tablet: keep two columns but shrink the form panel so the poster
+   * dominates the canvas as the design intent calls for */
+  @media (max-width: 900px) {
+    main {
+      grid-template-columns: minmax(240px, 300px) 1fr;
+      gap: 20px;
+    }
   }
   @media (max-width: 760px) {
     main {
       grid-template-columns: 1fr;
+      gap: 16px;
     }
   }
   .error {
@@ -171,6 +186,15 @@
     border: 1px solid var(--hairline, rgba(26,26,26,.2));
     padding: 4px 10px;
     border-radius: 4px;
+  }
+  /* header wraps; brand and nav never collide on a narrow viewport */
+  @media (max-width: 520px) {
+    header {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .frame { padding: 16px; }
   }
   .lb-btn:hover { border-color: var(--accent, #d8412f); }
 </style>

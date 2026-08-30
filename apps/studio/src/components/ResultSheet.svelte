@@ -325,20 +325,41 @@
 <style>
 section { min-height: 420px; }
 .empty { color: var(--ink-soft); border: 1px dashed var(--hairline); padding: 48px 24px; text-align: center; }
-.poster-mat { margin: 0 0 16px; padding: 14px; background: #ffffff; border: 1px solid var(--hairline); box-shadow: 0 1px 0 rgba(26,26,26,.08); display: inline-block; }
+.poster-mat {
+  margin: 0 0 16px;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid var(--hairline);
+  box-shadow: 0 1px 0 rgba(26,26,26,.08);
+  /* poster must FILL the column on mobile (no tiny inline thumbnail) while
+   * preserving its 3:5 ratio — width set by container, height derives */
+  width: 100%;
+  max-width: 100%;
+}
 .poster-mat img {
-  display: block; max-width: 100%; height: auto;
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 5;
+  object-fit: contain;
   border: 1px solid rgba(26,26,26,.12); border-radius: 8px;
   cursor: zoom-in; transition: box-shadow .18s, transform .18s;
 }
 .poster-mat .poster-zoom {
   display: block; padding: 0; border: none; background: none; cursor: zoom-in;
+  width: 100%;
 }
 .poster-mat .poster-zoom:hover img {
   box-shadow: 0 14px 36px rgba(26,26,26,.22);
   transform: translateY(-2px);
 }
-.poster-mat canvas { display: block; max-width: 100%; height: auto; border-radius: 8px; }
+.poster-mat canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 5;
+  border-radius: 8px;
+}
 .poster-mat figcaption { margin-top: 8px; font-size: 11px; color: var(--ink-soft); display: flex; gap: 10px; align-items: center; }
 .poster-mat button { background: none; border: 1px solid var(--hairline); padding: 3px 10px; cursor: pointer; font-size: 11px; }
 .poster-mat button:hover { border-color: var(--accent); }
@@ -347,7 +368,7 @@ section { min-height: 420px; }
 .chip { display: inline-block; background: var(--paper); border: 1px solid var(--hairline); padding: 1px 6px; margin-left: 4px; }
 .src { float: right; color: var(--ink-soft); }
 .recipe-line { font-size: 11.5px; color: var(--ink-soft); margin: 0 0 6px; }
-.sheet { white-space: pre-wrap; background: var(--paper-raised); border: 1px solid var(--hairline); padding: 14px; font-size: 12.5px; line-height: 1.65; max-height: 320px; overflow: auto; }
+.sheet { white-space: pre-wrap; background: var(--paper-raised); border: 1px solid var(--hairline); padding: 14px; font-size: 12.5px; line-height: 1.65; max-height: 320px; overflow: auto; -webkit-overflow-scrolling: touch; }
 .mono { font-family: var(--mono); }
 .actions { padding-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 .actions button { background: none; border: 1px solid var(--hairline); padding: 7px 14px; cursor: pointer; letter-spacing: .08em; }

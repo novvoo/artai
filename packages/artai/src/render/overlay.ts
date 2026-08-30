@@ -10,6 +10,8 @@
 import { Rng } from "../core/util/rand.js";
 import { mix, readableOn } from "../core/util/color.js";
 import { beginJob, drawCustomMotif, drawMotifArt, endJob, type Pal } from "./motif-art.js";
+import { getAsset, assetSize } from "./assets.js";
+import { degradePhotoPixels, treatmentToDegrade } from "./photoTone.js";
 
 type Ctx2D = CanvasRenderingContext2D;
 type Pt = [number, number];
@@ -66,7 +68,7 @@ export function paintOverlay(
         paintGrain(ctx, ir.canvas as { width: number; height: number }, rng, op, detail);
         break;
       case "photoFragment":
-        if (!op.asset) paintPlaceholder(ctx, op);
+        paintPhotoFragment(ctx, op);
         break;
       default:
         break;
@@ -473,6 +475,53 @@ function paintPlaceholder(ctx: Ctx2D, op: Record<string, unknown>): void {
 }
 
 /* ------------------------------- grain ---------------------------------- */
+
+/**
+ * The写实 channel (architecture §10): paste the user's ORIGINAL photo pixels
+ * into the fragment box, then degrade them with print grammar so the photo
+ * belongs to the sheet without losing its realism. Cover-crops the source
+ * (center), applies tone-match + the recipe's texture mode as per-pixel
+ * transforms, writes back via putImageData. Missing/unusable assets fall
+ * back to the placeholder — never a silent blank.
+ */
+function paintPhotoFragment(ctx: Ctx2D, op: Record<string, unknown>): void {
+  const id = String(op.asset ?? "");
+  const [bx0, by0, bw0, bh0] = (op.box as [number, number, number, number]) ?? [0, 0, 100, 160];
+  const asset = id ? getAsset(id) : undefined;
+  if (!asset) {
+    paintPlaceholder(ctx, op);
+    return;
+  }
+  try {
+    const [sw, sh] = assetSize(asset);
+    const bw = Math.max(1, Math.round(bw0));
+    const bh = Math.max(1, Math.round(bh0));
+    if (!sw || !sh) throw new Error("asset has no pixels");
+    // cover-crop: center window of the source at the box aspect
+    const scale = Math.max(bw / sw, bh / sh);
+    const cw = Math.max(1, Math.min(sw, Math.round(bw / scale)));
+    const ch = Math.max(1, Math.min(sh, Math.round(bh / scale)));
+    const sx = Math.round((sw - cw) / 2);
+    const sy = Math.round((sh - ch) / 2);
+    const off = document.createElement("canvas");
+    off.width = bw;
+    off.height = bh;
+    const octx = off.getContext("2d");
+    if (!octx) throw new Error("canvas 2d unavailable");
+    octx.drawImage(asset as CanvasImageSource, sx, sy, cw, ch, 0, 0, bw, bh);
+    const img = octx.getImageData(0, 0, bw, bh);
+    const rng = new Rng(`photo:${id}:${bw}x${bh}:${String(op.treatment ?? "")}`);
+    degradePhotoPixels(
+      img.data, bw, bh,
+      treatmentToDegrade(op.treatment as string | undefined),
+      rng, String(op.paper ?? "#F5F0E6"),
+    );
+    octx.putImageData(img, 0, 0);
+    ctx.drawImage(off, bx0, by0);
+  } catch {
+    paintPlaceholder(ctx, op);
+  }
+}
 
 /**
  * Real print grain — a per-pixel ImageData pass, not painted dots.

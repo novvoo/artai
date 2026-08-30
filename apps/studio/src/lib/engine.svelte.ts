@@ -11,6 +11,7 @@ import {
   paletteFromPixels,
   paperToneHex,
 } from "artai/core";
+import { registerAsset } from "artai";
 import type { IntentDraft } from "artai/core";
 
 const hasLS = typeof localStorage !== "undefined";
@@ -142,7 +143,7 @@ export function activePalette(): PalettePreset | undefined {
   return p?.accent ? p : undefined;
 }
 
-/* ============ 原始图片输入模式（image-palette override） ============ */
+/* ============ 原始图片输入模式（image-palette + photo fragment） ============ */
 /** Palette measured from a user-supplied original image (paletteFromPixels).
  * Takes priority over the 配色 preset until the user picks a preset again.
  * Object wrapper: module-level $state must be mutated in place, never
@@ -150,13 +151,24 @@ export function activePalette(): PalettePreset | undefined {
 export const imagePaletteState = $state<{ current: PalettePreset | null }>({
   current: null,
 });
+/** the decoded ORIGINAL image, registered as a render asset — the run flips
+ * to photo-input mode and the photoFragment op paints its REAL pixels into
+ * the focal box (degraded to print grammar). Canvas lives outside $state
+ * (heavy, non-serializable); only the id is reactive. */
+export const photoAsset = $state<{ id: string | null }>({ id: null });
+let photoAssetCanvas: HTMLCanvasElement | null = null;
+/** thumbnail dataUrl (≤160px) of the loaded photo — shown in the upload
+ * card so the user can confirm the right image was loaded before GENERATE */
+export const photoThumb = $state<{ dataUrl: string | null }>({ dataUrl: null });
 /** image:<accent>:<paper> tag — cache scope + history identity for a run
  * driven by an extracted palette (restore replays the hexes, no re-decode) */
 function imagePaletteTag(p: PalettePreset): string {
   return `image:${p.accent}:${p.paper}`;
 }
 
-/** decode an uploaded original image → measured palette → locked override */
+/** decode an uploaded original image → measured palette + render asset.
+ * One upload does BOTH: drives the 配色 and becomes the poster's focal
+ * photo fragment (the写实 channel). */
 export async function applyImagePaletteFromFile(file: File): Promise<string> {
   const dataUrl = await new Promise<string>((res, rej) => {
     const fr = new FileReader();
@@ -170,19 +182,36 @@ export async function applyImagePaletteFromFile(file: File): Promise<string> {
     img.onerror = () => rej(new Error("图片解码失败（仅支持常见位图格式）"));
     img.src = dataUrl;
   });
-  // downscale into a ≤220px sampling canvas — the palette only needs
-  // statistics, and the demo contract is honored: pixels from the REAL image
-  const maxSide = 220;
-  const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-  const w = Math.max(1, Math.round(img.naturalWidth * scale));
-  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  // full-resolution canvas for the photoFragment stamp (capped at 1400px —
+  // beyond the focal box it would only burn memory)
+  const cap = 1400;
+  const fscale = Math.min(1, cap / Math.max(img.naturalWidth, img.naturalHeight));
+  const fw = Math.max(1, Math.round(img.naturalWidth * fscale));
+  const fh = Math.max(1, Math.round(img.naturalHeight * fscale));
+  const full = document.createElement("canvas");
+  full.width = fw; full.height = fh;
+  full.getContext("2d")?.drawImage(img, 0, 0, fw, fh);
+
+  // ≤220px sampling canvas for palette statistics
+  const sScale = Math.min(1, 220 / Math.max(fw, fh));
+  const w = Math.max(1, Math.round(fw * sScale));
+  const h = Math.max(1, Math.round(fh * sScale));
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
   const ctx = c.getContext("2d");
   if (!ctx) throw new Error("Canvas2D 不可用，无法解析图片");
-  ctx.drawImage(img, 0, 0, w, h);
+  ctx.drawImage(full, 0, 0, fw, fh, 0, 0, w, h);
   const data = ctx.getImageData(0, 0, w, h);
   const pal = paletteFromPixels(data.data, w, h);
+
+  // stable asset id from the file content — same image ⇒ same recipe id
+  const digest = await crypto.subtle.digest("SHA-256",
+    new TextEncoder().encode(dataUrl.slice(0, 4096) + file.size));
+  const id = "photo-" + [...new Uint8Array(digest)].slice(0, 8)
+    .map(b => b.toString(16).padStart(2, "0")).join("");
+  registerAsset(id, full);
+  photoAssetCanvas = full;
+
   imagePaletteState.current = {
     id: "image",
     label: "图片取色",
@@ -190,14 +219,32 @@ export async function applyImagePaletteFromFile(file: File): Promise<string> {
     accent2: pal.accent2,
     paper: pal.paper,
   };
-  return `accent ${pal.accent} · paper ${pal.paper} · 对比度 ${pal.stats.contrast.toFixed(2)}`;
+  photoAsset.id = id;
+  // 160px thumbnail for the upload card preview (rebuilt from the full-res
+  // canvas — no need to re-encode the dataUrl we just discarded)
+  try {
+    const t = document.createElement("canvas");
+    const s = Math.min(1, 160 / Math.max(full.width, full.height));
+    t.width = Math.max(1, Math.round(full.width * s));
+    t.height = Math.max(1, Math.round(full.height * s));
+    t.getContext("2d")?.drawImage(full, 0, 0, t.width, t.height);
+    photoThumb.dataUrl = t.toDataURL("image/jpeg", 0.82);
+  } catch { /* preview unavailable — gallery falls back to chip-only hint */ }
+  return `accent ${pal.accent} · paper ${pal.paper} · 图片将作为海报主体（写实通道）`;
 }
 
-/** re-apply an extracted palette from stored hexes (history restore) */
+/** re-apply an extracted palette from stored hexes (history restore). The
+ * photo pixels themselves aren't persisted — the fragment falls back to its
+ * placeholder until the user re-picks the original file. */
 export function applyImagePaletteHexes(accent: string, paper: string): void {
   imagePaletteState.current = { id: "image", label: "图片取色", accent, paper };
 }
-export function clearImagePalette(): void { imagePaletteState.current = null; }
+export function clearImagePalette(): void {
+  imagePaletteState.current = null;
+  photoAsset.id = null;
+  photoAssetCanvas = null;
+  photoThumb.dataUrl = null;
+}
 
 /* ============ cache module (three-phase gen cache) ============ */
 
@@ -480,6 +527,47 @@ class Engine {
     return true;
   }
 
+  /** persist the original photo next to the composition cache so 恢复历史
+   * can re-register the asset and re-paste the real pixels (JPEG ≤1000px) */
+  private async savePhotoToCache(): Promise<void> {
+    if (!photoAsset.id || !photoAssetCanvas) return;
+    try {
+      const key = "photo." + (await this.graphCacheKey()).slice("graph.".length);
+      const src = photoAssetCanvas;
+      const scale = Math.min(1, 1000 / Math.max(src.width, src.height));
+      const w = Math.max(1, Math.round(src.width * scale));
+      const h = Math.max(1, Math.round(src.height * scale));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d")?.drawImage(src, 0, 0, w, h);
+      cacheSet(key, { id: photoAsset.id, dataUrl: c.toDataURL("image/jpeg", 0.85) });
+    } catch { /* quota / encode failure — the fragment falls back to placeholder */ }
+  }
+
+  /** re-register a persisted photo asset (history restore) — must run BEFORE
+   * realize so the re-realized IR carries the photoFragment with the asset id */
+  private async restorePhotoFromCache(): Promise<void> {
+    if (photoAsset.id) return; // live session already has the pixels
+    try {
+      const key = "photo." + (await this.graphCacheKey()).slice("graph.".length);
+      const pk = cacheGet<{ id: string; dataUrl: string }>(key);
+      if (!pk?.id || !pk.dataUrl) return;
+      const img = new Image();
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res();
+        img.onerror = () => rej(new Error("cached photo undecodable"));
+        img.src = pk.dataUrl;
+      });
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.getContext("2d")?.drawImage(img, 0, 0);
+      registerAsset(pk.id, c);
+      photoAssetCanvas = c;
+      photoAsset.id = pk.id;
+      this.pushLog("✓ 照片资产已从缓存恢复（写实主体将重新贴入）");
+    } catch { /* no cached photo — placeholder fallback */ }
+  }
+
   /** restore a cached run: theme + seed back into the panel, graph/poster
    * re-rendered from the cached composition (no LLM round-trip) */
   async restoreHistory(entry: HistoryEntry): Promise<void> {
@@ -523,6 +611,7 @@ class Engine {
 
       // rebuild a minimal envelope: reuse the live intent/realize caches so
       // the palette/IR/chrome come back exactly as they were
+      await this.restorePhotoFromCache();
       const draftKey = await genHash(theme, "intent:v1");
       let draft: IntentDraft | null = useCache.on
         ? cacheGet<IntentDraft>("intent." + draftKey) : null;
@@ -532,6 +621,7 @@ class Engine {
         return;
       }
       artai.setDefaultProvider(bpInstance());
+      if (photoAsset.id) draft = { ...draft, mode: "photo-input" };
       env = await artai.realize(draft, {
         seed,
         backend: this.backend === "render" ? "render" : "prompt",
@@ -581,6 +671,32 @@ class Engine {
   }
 
   /** LLM-authored composition graph, cached under the cache toggle */
+  /** 写实 brief: tells the graph LLM where the real photo lands and what to
+   * paint around it — without this it authors a painted focal subject that
+   * the photo then covers. Returns null outside photo mode. */
+  private photoBrief(env: any): string | null {
+    if (!photoAsset.id || !env?.ir) return null;
+    const frag = (env.ir.ops ?? []).find((o: any) => o.op === "photoFragment");
+    if (!frag) return null;
+    const [x, y, w, h] = frag.box as [number, number, number, number];
+    const W = env.ir.canvas.width, H = env.ir.canvas.height;
+    const share = Math.round((w * h) / (W * H) * 100);
+    return [
+      "=== PHOTO FRAGMENT (写实主体 — the focal subject is a REAL PHOTOGRAPH) ===",
+      `A real photograph is pasted at rect (${Math.round(x)}, ${Math.round(y)}) to (${Math.round(x + w)}, ${Math.round(y + h)}) — about ${share}% of the sheet — ON TOP of your layers.`,
+      "Do NOT paint any subject, plate, silhouette or vignette inside that rect: it will be covered by the photo.",
+      "Compose AROUND it: atmosphere, ground plane, props, and a soft contact shadow along its bottom edge.",
+      "The photo already carries the poster's contrast — scene strokes stay quieter than it (mid-tones, thin lines).",
+    ].join("\n");
+  }
+
+  /** the photoFragment rect of the current envelope, when photo mode is on */
+  private reservedPhotoBox(env: any): [number, number, number, number] | null {
+    if (!photoAsset.id || !env?.ir) return null;
+    const frag = (env.ir.ops ?? []).find((o: any) => o.op === "photoFragment");
+    return frag ? (frag.box as [number, number, number, number]) : null;
+  }
+
   private async composeGraphCached(
     env: any, fullSpec: string, onDelta?: (chunk: string) => void,
     onStatus?: (label: string) => void, signal?: AbortSignal,
@@ -599,10 +715,13 @@ class Engine {
         return fixed;
       }
     }
+    const photo = this.photoBrief(env);
+    const reserved = this.reservedPhotoBox(env);
     const graph = await bpInstance().composeGraph({
-      fullSpec,
+      fullSpec: photo ? `${fullSpec}\n\n${photo}` : fullSpec,
       paletteHexes: paletteOf(env),
       theme: this.theme.trim(),
+      ...(reserved ? { reservedBox: reserved } : {}),
       ...(onDelta ? { onDelta } : {}),
       ...(onStatus ? { onStatus } : {}),
       ...(signal ? { signal } : {}),
@@ -656,11 +775,16 @@ class Engine {
       artai.setDefaultProvider(bpInstance());
 
       this.pushLog("\u2461 \u914d\u65b9\u00b7\u7248\u5f0f\u00b7\u95e8\u7981\uff08\u672c\u5730\u786e\u5b9a\u6027\u7ba1\u7ebf\uff09\u2026");
+      // 原始图片模式: the uploaded photo becomes the poster's focal
+      // fragment — flip the draft into photo-input so the solver reserves a
+      // photo box and the IR carries the photoFragment op
+      if (photoAsset.id) draft = { ...draft, mode: "photo-input" };
       env = await artai.realize(draft, {
         seed,
         backend: this.backend === "render" ? "render" : "prompt",
         ...realizeOverrides(),
       });
+      if (photoAsset.id) this.pushLog("✓ 写实通道：原始照片已注册为海报主体（photoFragment）");
       const pal = activePalette();
       this.pushLog(`\u2713 \u914d\u65b9\u5c31\u7eea\uff1alayout=${env.recipe.layout.family} \u00b7 focal=${env.recipe.focal.form} \u00b7 hue=${env.recipe.color.hue}${pal ? ` \u00b7 \u914d\u8272=${pal.label}` : ""} \u00b7 \u95e8\u7981 ${env.gate.pass ? "pass" : "degraded"}`);
       this.chk();
@@ -791,6 +915,7 @@ class Engine {
       if (!this.error && !signal.aborted) {
         this.stageIndex = 6; this.stageLabelZh = "done";
         this.pushLog(`✓ 完成，耗时 ${Math.round((Date.now() - t0) / 100) / 10}s`);
+        await this.savePhotoToCache();
         await this.recordHistory().catch((err) =>
           this.pushLog(`✗ 历史记录写入失败：${err instanceof Error ? err.message : String(err)}`));
       }
@@ -832,10 +957,13 @@ class Engine {
       const complaints = critiqueGraph(this.graph as any);
       this.logOpen = true;
       this.pushLog(`▶ 继续打磨 · 审计当前终稿：${complaints.length ? `${complaints.length} 项问题 — ${complaints.join("; ")}` : "无硬伤，执行提升级打磨"}${this.polishNote.trim() ? ` · 用户建议：「${this.polishNote.trim()}」` : ""}`);
+      const photo = this.photoBrief(env);
+      const reserved = this.reservedPhotoBox(env);
       const graph = await bpInstance().composeGraph({
-        fullSpec: String(this.fullSpec ?? ""),
+        fullSpec: photo ? `${String(this.fullSpec ?? "")}\n\n${photo}` : String(this.fullSpec ?? ""),
         paletteHexes: paletteOf(env),
         theme: this.theme.trim(),
+        ...(reserved ? { reservedBox: reserved } : {}),
         previousGraph: {
           graphJson: JSON.stringify({
             lightDeg: this.graph.lightDeg, layers: this.graph.layers,
@@ -879,6 +1007,7 @@ class Engine {
       this.renderWarnings = r.warnings || [];
       this.chk();
       this.pushLog(`✓ 打磨完成：${graph.layers.length} 层 · ${graph.layers.reduce((a: number, l: any) => a + (l.shapes?.length ?? 0), 0)} shapes · 海报已更新`);
+      await this.savePhotoToCache();
       await this.recordHistory().catch((err) =>
         this.pushLog(`✗ 历史记录写入失败：${err instanceof Error ? err.message : String(err)}`));
       // keep the composition cache coherent with the improved version
@@ -908,11 +1037,17 @@ class Engine {
 
 let env: any;
 
-/** realize() overrides for the user-locked 配色 preset (empty = 自动) */
-function realizeOverrides(): { accent?: string; paperTone?: string } {
+/** realize() overrides for the user-locked 配色 preset (empty = 自动) plus
+ * the photo asset id when an original image is loaded (写实通道) */
+function realizeOverrides(): { accent?: string; paperTone?: string; photoAssetId?: string } {
+  const out: { accent?: string; paperTone?: string; photoAssetId?: string } = {};
   const p = activePalette();
-  if (!p?.accent) return {};
-  return p.paper ? { accent: p.accent, paperTone: p.paper } : { accent: p.accent };
+  if (p?.accent) {
+    if (p.paper) { out.accent = p.accent; out.paperTone = p.paper; }
+    else out.accent = p.accent;
+  }
+  if (photoAsset.id) out.photoAssetId = photoAsset.id;
+  return out;
 }
 
 /** history identity of the active palette: preset id, or the measured

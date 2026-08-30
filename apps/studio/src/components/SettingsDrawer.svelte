@@ -167,6 +167,15 @@
     align-items: center;
     margin: 18px 0;
   }
+  /* mobile: stack the key|value grid into one column so the inputs get
+   * the full width and the keyboard doesn't squish a 118px label column */
+  @media (max-width: 520px) {
+    .grid {
+      grid-template-columns: 1fr;
+      gap: 6px 0;
+    }
+    .grid label { margin-top: 8px; }
+  }
   label {
     font-size: 10.5px;
     letter-spacing: 0.14em;
@@ -232,6 +241,8 @@
   button {
     background: none;
     border: 1px solid var(--hairline);
+    /* touch targets: the iOS / WCAG recommended minimum is 44px high */
+    min-height: 36px;
     padding: 8px 18px;
     cursor: pointer;
     font-size: 13px;
@@ -239,6 +250,12 @@
   }
   button:hover {
     border-color: var(--accent);
+  }
+  @media (max-width: 520px) {
+    section { max-width: none; }
+    .wire { flex-direction: column; align-items: stretch; }
+    .wire select { min-width: 0; width: 100%; }
+    .row { flex-wrap: wrap; }
   }
   .danger:hover {
     border-color: #a33c1d;

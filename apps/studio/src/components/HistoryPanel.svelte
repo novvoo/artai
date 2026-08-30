@@ -8,10 +8,17 @@
   };
 
   let open = $state(false);
+  // cap initial render at 20 entries; long histories (60+ cached runs) would
+  // otherwise force the panel to lay out dozens of <img> thumbs on mobile
+  let shown = $state(20);
+  $effect(() => {
+    if (engine.history.length <= 20) shown = engine.history.length;
+  });
   const list = $derived(engine.history);
 
   function refresh(): void {
     engine.history = loadHistory();
+    shown = Math.min(20, engine.history.length);
   }
 
   async function jump(entry: HistoryEntry): Promise<void> {
@@ -38,7 +45,7 @@
       <p class="empty">还没有历史记录 — 完成一次 GENERATE 后会出现在这里。</p>
     {:else}
       <ul>
-        {#each list as h (h.key + h.model)}
+        {#each list.slice(0, shown) as h (h.key + h.model)}
           <li>
             <button onclick={() => void jump(h)} disabled={engine.busy}
               title="点击恢复到这次生成的缓存状态">
@@ -67,6 +74,11 @@
           </li>
         {/each}
       </ul>
+      {#if list.length > shown}
+        <button class="show-more" onclick={() => { shown = Math.min(shown + 20, list.length); }}>
+          加载更早的 {Math.min(20, list.length - shown)} 条（共 {list.length}）
+        </button>
+      {/if}
     {/if}
   </div>
 {/if}
@@ -93,7 +105,7 @@
     right: 18px;
     bottom: 104px;
     z-index: 81;
-    width: 340px;
+    width: min(340px, calc(100vw - 24px));
     max-height: 62vh;
     overflow: auto;
     background: var(--paper, #fbf7ee);
@@ -194,5 +206,37 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .show-more {
+    width: 100%;
+    background: none;
+    border: 1px dashed var(--hairline, rgba(26,26,26,.2));
+    color: var(--ink-soft, #6b675e);
+    font-size: 12px;
+    padding: 10px;
+    margin: 8px 12px 4px;
+    cursor: pointer;
+    /* breathing room from the FAB on mobile */
+    width: calc(100% - 24px);
+  }
+  .show-more:hover { border-color: var(--accent, #d8412f); color: var(--accent, #d8412f); }
+  /* mobile: history becomes a full-width sheet pinned to the bottom, with
+   * extra padding so a finger hit on a row never collides with the FAB */
+  @media (max-width: 520px) {
+    .hist-panel {
+      right: 8px;
+      left: 8px;
+      bottom: 92px;
+      width: auto;
+      max-height: 70vh;
+      -webkit-overflow-scrolling: touch;
+    }
+    .hist-fab {
+      width: 48px;
+      height: 48px;
+      font-size: 11px;
+    }
+    .row { padding: 10px 12px; }
+    .row .meta { font-size: 11px; }
   }
 </style>

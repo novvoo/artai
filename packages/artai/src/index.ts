@@ -11,7 +11,7 @@ export {
   getDefaultProvider,
   type BrowserModelConfig,
 } from "./agent/index.js";
-export { renderPoster, renderGraphPoster, paintGraphOntoCanvas, brushAvailable } from "./render/index.js";
+export { renderPoster, renderGraphPoster, paintGraphOntoCanvas, brushAvailable, registerAsset, getAsset, clearAssets, hasAsset } from "./render/index.js";
 export { applyCustomMotif } from "./core/scene/custom.js";
 export type { CustomMotifSpec } from "./core/scene/custom.js";
 export type { RasterResult, RenderOptions } from "./render/index.js";

@@ -146,10 +146,14 @@ export function compileScene(recipe: Recipe, plan: Plan): SceneIR {
   } else {
     [p.cluster, ...p.extraPanels].forEach((panel, i) => {
       const box = [snap(panel.x), snap(panel.y), snap(panel.w), snap(panel.h)] as [number,number,number,number];
-      const isPhoto = recipe.focal.form.includes("photo");
+      // photo-input mode PROMISES a photo fragment — focal form alone is
+      // not enough ("torn-clipping" doesn't contain the word "photo")
+      const isPhoto = recipe.mode === "photo-input" || recipe.focal.form.includes("photo");
       if (!isPhoto) ops.push(shadowOp(box));
       ops.push(isPhoto
-        ? { op: "photoFragment", box, asset: null, preserve: recipe.photo?.preservation ?? null,
+        ? { op: "photoFragment", box, asset: recipe.photo?.assetId ?? null,
+            preserve: recipe.photo?.preservation ?? null,
+            treatment: recipe.focal.treatment, paper: tone,
             color: "#cfc4ad", index: i }
         : { op: "fill", box, color: i === 0 ? panelBase : shade(panelBase, 0.18),
             bleed: recipe.focal.treatment === "letterpress-bleed" ? [0.2, "out"] : undefined,
@@ -184,8 +188,13 @@ export function compileScene(recipe: Recipe, plan: Plan): SceneIR {
   }
 
   /* ---- 4. motif vignette (86% of the cluster core) ---- */
+  // 写实 mode: the photoFragment (section 2) already owns the cluster core —
+  // the painted vignette and the hatch pass would land ON TOP of the real
+  // photo (overlay ops run in order). Keep them only as the no-asset
+  // fallback so a missing photo still yields a painted subject.
+  const photoWillRender = recipe.mode === "photo-input" && Boolean(recipe.photo?.assetId);
   const motifAccent = isCarrier ? accent : mix(accent, "#26241f", 0.25);
-  ops.push({
+  if (!photoWillRender) ops.push({
     op: "motif",
     id: motifId,
     box: motifBox.map(snap),
@@ -198,7 +207,7 @@ export function compileScene(recipe: Recipe, plan: Plan): SceneIR {
   });
 
   /* ---- 5. hatch pass per treatment ---- */
-  if (recipe.focal.treatment === "halftone-degradation" || recipe.focal.treatment === "risograph-grain") {
+  if (!photoWillRender && (recipe.focal.treatment === "halftone-degradation" || recipe.focal.treatment === "risograph-grain")) {
     ops.push({ op: "hatch", region: p.polyPoints ? "cluster-poly" : undefined,
       box: p.polyPoints ? undefined : [p.cluster.x, p.cluster.y, p.cluster.w, p.cluster.h],
       dist: recipe.focal.treatment === "halftone-degradation" ? 5 : 7,

@@ -728,6 +728,9 @@ export class BrowserIntentProvider implements IntentProvider {
      * studio's 继续打磨 button): complaints empty ⇒ a generic elevation
      * brief is used instead */
     previousGraph?: { graphJson: string; complaints?: string[] };
+    /** 写实 mode: the photoFragment rect — the real photo is pasted there ON
+     * TOP of the graph, so the art-director gate flags shapes squatting on it */
+    reservedBox?: [number, number, number, number];
     /** the user's own polish suggestion — injected into the patch prompt
      * as high-priority guidance (e.g. "把主体移到左下，加一只猫") */
     userNote?: string;
@@ -957,7 +960,11 @@ export class BrowserIntentProvider implements IntentProvider {
         // Complaints seed the next attempt's revision; if the attempt budget
         // runs out, the fewest-complaints version wins — a flawed graph is
         // still better than the RAW baseline fallback.
-        const complaints = critiqueGraph(graph);
+        const complaints = critiqueGraph(graph, input.reservedBox
+          ? { reservedBoxes: [{ x0: input.reservedBox[0], y0: input.reservedBox[1],
+                                x1: input.reservedBox[0] + input.reservedBox[2],
+                                y1: input.reservedBox[1] + input.reservedBox[3] }] }
+          : undefined);
         if (!complaints.length) return graph;
         if (!best || complaints.length < best.complaints)
           best = { graph, complaints: complaints.length };

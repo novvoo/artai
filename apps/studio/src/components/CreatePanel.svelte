@@ -20,6 +20,7 @@
     imagePaletteState,
     applyImagePaletteFromFile,
     clearImagePalette,
+    photoThumb,
   } from "../lib/engine.svelte.js";
   import { shade } from "artai/core";
 
@@ -60,7 +61,7 @@
   <div class="img-palette-row">
     <label class="img-btn">
       <input type="file" accept="image/*" onchange={pickImage} />
-      原始图片取色…
+      原始图片（取色 + 主体）…
     </label>
     {#if imagePaletteState.current}
       <span class="chip" title={`从图片实测：accent ${imagePaletteState.current.accent} · paper ${imagePaletteState.current.paper}`}>
@@ -68,6 +69,11 @@
         <i class="wide" style={`background:${imagePaletteState.current.accent}`}></i>
         <i style={`background:${imagePaletteState.current.paper}`}></i>
       </span>
+      {#if photoThumb.dataUrl}
+        <span class="thumb-chip" title="原始照片（将作为海报主体）">
+          <img src={photoThumb.dataUrl} alt="原始照片缩略" />
+        </span>
+      {/if}
       <span class="img-note">{imgNote || `${imagePaletteState.current.accent} · ${imagePaletteState.current.paper}`}</span>
       <button class="img-clear" onclick={() => { clearImagePalette(); imgNote = ""; }}
         title="清除图片取色，回到配色预设">✕</button>
@@ -99,7 +105,7 @@
 
   <div class="row">
     <label for="seed">SEED</label>
-    <input id="seed" type="number" bind:value={engine.baseSeed} />
+    <input id="seed" type="number" inputmode="numeric" bind:value={engine.baseSeed} />
     <button onclick={rollSeed} title="随机基础种子">⟳</button>
     <select bind:value={engine.backend}>
       <option value="image" disabled={!imageCapable()}
@@ -224,6 +230,22 @@
     border-color: #a33c1d;
     color: #a33c1d;
   }
+  .thumb-chip {
+    display: inline-block;
+    width: 36px;
+    height: 36px;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--hairline);
+    background: #fff;
+    flex: 0 0 auto;
+  }
+  .thumb-chip img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
   .palette-grid {
     display: flex;
     flex-wrap: wrap;
@@ -286,6 +308,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
   }
   .row label {
     margin-top: 6px;
@@ -350,5 +373,15 @@
   .cache-row .wipe:hover {
     border-color: #a33c1d;
     color: #a33c1d;
+  }
+  /* mobile: 10 color swatches overflow a 300px column; let the chip strip
+   * hug its name to the side instead of stacking, and let the generate/stop
+   * pair stack at the smallest sizes */
+  @media (max-width: 420px) {
+    .swatch { width: 100%; flex-direction: row; gap: 6px; padding: 4px 6px; }
+    .chip { width: 56px; height: 14px; flex: 0 0 auto; }
+    .pname { font-size: 11px; letter-spacing: 0; }
+    .gen-row { flex-direction: column; }
+    .stop { padding: 8px 12px; }
   }
 </style>

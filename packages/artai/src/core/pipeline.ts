@@ -37,6 +37,9 @@ export interface RealizeOptions {
   readonly accent?: string;
   /** user-locked paper tone hex (studio 配色 preset) */
   readonly paperTone?: string;
+  /** registered render-asset id of the user's original photo — forwarded to
+   * pickRecipe so the photoFragment op paints REAL pixels (photo-input mode) */
+  readonly photoAssetId?: string;
   readonly onStage?: (stage: StageName, data?: unknown) => void;
 }
 
@@ -62,6 +65,7 @@ export function realize(draft: IntentDraft, opts: RealizeOptions): Envelope {
       detail: opts.detail,
       accent: opts.accent,
       paperTone: opts.paperTone,
+      ...(opts.photoAssetId ? { photoAssetId: opts.photoAssetId } : {}),
       contentKey: `${draft.metaphor.subject}|${draft.metaphor.relation}`,
     });
     const motifId = resolveMotifId(draft.motifHint);

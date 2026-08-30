@@ -319,6 +319,9 @@
           "items": {
             "type": "string"
           }
+        },
+        "assetId": {
+          "type": "string"
         }
       },
       "required": [

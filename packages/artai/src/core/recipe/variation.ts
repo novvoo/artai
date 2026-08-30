@@ -101,6 +101,9 @@ export interface RecipeOptions {
   readonly accent?: string | undefined;
   /** user-locked paper tone hex (studio 配色 preset) */
   readonly paperTone?: string | undefined;
+  /** registered render-asset id for the user's original photo — threads onto
+   * recipe.photo.assetId so the photoFragment op paints REAL pixels */
+  readonly photoAssetId?: string | undefined;
 }
 
 /** Mood-constrained hue pools: the emotional temperature steers chromatics
@@ -192,6 +195,7 @@ export function pickRecipe(draft: IntentDraft, opts: RecipeOptions): Recipe {
             role: "edit-target" as const,
             preservation: "high" as const,
             invariants: ["subject recognizable", "defining proportions"],
+            ...(opts.photoAssetId ? { assetId: opts.photoAssetId } : {}),
           },
         } satisfies Pick<Recipe, "photo">)
       : {}),
