@@ -19,7 +19,10 @@ const GradientFillSchema = z.object({
   x: z.number(), y: z.number(), w: z.number(), h: z.number(),
   colorTop: z.string(),
   colorBottom: z.string(),
-  alpha: z.number().min(0).max(1).default(0.9),
+  // GLAZE semantics: every gradient above the paper is a transparent wash —
+  // a missing alpha must never resolve to a near-opaque blanket that buries
+  // the layers beneath it (the paper layer authors alpha 1 explicitly)
+  alpha: z.number().min(0).max(1).default(0.3),
 });
 
 const BlobSchema = z.object({
@@ -112,10 +115,11 @@ const SHAPES_VOCAB = `Each shape is one of:
 - {"type":"round_rect","x":n,"y":n,"w":n,"h":n,"r"?:n,"rot"?:n,"fill":"#hex","alpha":n}  \u2014 books, doors, tables, panels
 - {"type":"stroke_path","points":[[x,y],[x,y],\u2026],"color":"#hex","lineWidth":n,"dashPattern"?:[n,n],"pressureTaper":boolean}
 - {"type":"vignette","intensity":n}
-- {"type":"grain","density":n}`;
+- {"type":"grain","density":n}  \u2014 n counts speckles per 1200\u00d72000 canvas, use 800\u20134000 (NEVER a 0\u20131 fraction)`;
 
 const AUTHORING_PROCESS = `AUTHORING PROCESS \u2014 think like an illustrator before writing JSON:
-1. DEPTH = VIEWER DISTANCE: depth is paint order AND occlusion \u2014 where two elements overlap, the one NEARER the viewer gets the HIGHER depth. A platform edge / table front / window frame occludes whatever lies beyond it (rails, floor, skyline); the focal subject occludes its backdrop. Getting this backwards puts far-away rails IN FRONT of near objects
+1. DEPTH = VIEWER DISTANCE: depth is paint order AND occlusion \u2014 where two elements overlap, the one NEARER the viewer gets the HIGHER depth. Getting this backwards puts far-away rails IN FRONT of near objects. Follow this z-ladder for scene posters:
+   sky/air (1) \u2192 far structure: horizon, distant canopy (2\u20133) \u2192 GROUND PLANE: rails, tracks, roads (4\u20135) \u2192 objects STANDING ON the ground in front of them: platform edge, furniture (5\u20136) \u2192 the focal subject (7\u20138) \u2192 small marks (9). Rails/tracks are part of the FLOOR \u2014 anything standing in front of them paints OVER them, never the reverse
 2. PLACE: the focal object sits on a rule-of-thirds intersection, roughly 45\u201365% down the canvas \u2014 never dead center, never clipped by margins
 3. LIGHT: lightDeg is the light angle. Shading blobs and shadow masses go on the OPPOSITE side of the focal object; rim highlights on the lit side
 4. VALUES: block 3\u20134 big value masses first (paper, one mid wash, one dark accent) \u2014 one dominant, one secondary, small accents; generous empty paper is GOOD
@@ -127,11 +131,19 @@ const LAYER_RULES = `Rules:
 \u2022 Create 10\u201313 layers organized by depth (0=background, 10=finisher) \u2014 graphs with fewer than 10 layers are AUTO-REJECTED and retried
 \u2022 3\u20135 shapes per layer (focal layer 6\u201310) \u2014 total shape count below 2.5\u00d7 the layer count is AUTO-REJECTED
 \u2022 Layer 0 must be a gradient_fill covering the full canvas (paper tone)
-\u2022 Add organic_blob layers for atmospheric/color masses behind the focal element
+\u2022 LAYERS ABOVE PAPER ARE GLAZES: transparent. gradient_fill washes use alpha 0.08\u20130.35; only the depth-0 paper may paint at alpha 1. A high-alpha rect veil buries every stroke beneath it \u2014 build opacity from overlapping transparent passes, never one opaque sheet
+\u2022 TYPOGRAPHY BELONGS TO THE OVERLAY: never draw type cells, letter boxes, or color bars standing in for text \u2014 the shared overlay stamps the real title. Draw the OBJECT (a sign plate, a timetable board) but no text, no empty glyph boxes
+\u2022 CONTRAST HIERARCHY: the FOCAL SUBJECT owns the darkest darks and the most saturated accents. Ground-plane structure (rails, roads, horizons, power lines) must be QUIETER: mix the ink \u224850% toward paper, keep lines thin \u2014 they are support, never competition. If the longest dark line in the poster is a rail, the poster's subject is the floor \u2014 wrong
+\u2022 OCCLUDE THE GROUND LINES: at least one nearer element (platform edge, furniture, the subject itself) must overlap and INTERRUPT rails/ground strokes. Two unbroken diagonals crossing the whole canvas hijack the eye and become the composition's skeleton
+\u2022 stroke_path lineWidth \u2264 24 \u2014 anything wider must be a filled shape (round_rect/organic_blob), or it renders as a blurry band
+\u2022 Wash/blob colors must sit clearly (\u224812%+ in value) away from the paper tone \u2014 near-paper colors render as invisible gray haze; if a layer would be invisible, delete it
+\u2022 At most ONE horizon-class line (near-horizontal, over half the canvas wide); every other long line takes a clearly different angle
+\u2022 Shadows and stains anchor to an object edge, on the side OPPOSITE lightDeg \u2014 never scatter small unattached blobs across empty ground
 \u2022 organic_blob harmonics control edge irregularity: 0.04\u20130.12 = gentle wash,
   0.15\u20130.3 = torn paper / stain edges
 \u2022 Long stroke_path lines (edges of tables, horizons, rails) look hand-drawn
   with pressureTaper=true; use dashPattern only for fine ticks
+\u2022 Every stroke must END somewhere meaningful: off the canvas edge, or joined to another form \u2014 no lines stopping mid-air
 \u2022 End with grain + vignette for printed-media character
 \u2022 Use ONLY colors from the provided palette (plus tints/shades)
 \u2022 Coordinates in a 1200\u00d72000 space`;
@@ -223,7 +235,45 @@ export function buildGraphJsonlUserPrompt(
 /* ============================ sanitization =============================== */
 
 export function sanitizeCompositionGraph(raw: unknown): CompositionGraph {
-  return CompositionGraphSchema.parse(raw);
+  const g = (raw ?? {}) as Record<string, unknown>;
+  const layers = Array.isArray(g.layers)
+    ? (g.layers as Array<Record<string, unknown>>).map((l) => {
+        const shapes = Array.isArray(l.shapes)
+          ? (l.shapes as Array<Record<string, unknown>>).map((s) =>
+              grainDensityRepair(veilAlphaRepair(s)))
+          : l.shapes;
+        return { ...l, shapes };
+      })
+    : g.layers;
+  return CompositionGraphSchema.parse({ ...g, layers });
+}
+
+/** grain density semantics repair: the painter expects a speckle COUNT per
+ * 1200×2000 canvas (schema floor 100), but models repeatedly author a 0–1
+ * "strength share" — 0.45 rounds to ZERO painted pixels and silently kills
+ * the finisher pass. Deterministically remap sub-10 values onto the count
+ * scale (0→800, 1→6000) instead of trusting the next retry to spell it out. */
+function grainDensityRepair(s: Record<string, unknown>): Record<string, unknown> {
+  if (s?.type !== "grain") return s;
+  const d = Number(s.density);
+  if (Number.isFinite(d) && d >= 0 && d < 10)
+    return { ...s, density: Math.round(800 + d * 5200) };
+  return s;
+}
+
+const isFullCanvasRect = (s: Record<string, unknown>): boolean =>
+  Number(s?.x ?? 0) <= 1 && Number(s?.y ?? 0) <= 1 &&
+  Number(s?.w ?? 0) >= 1100 && Number(s?.h ?? 0) >= 1900;
+
+/** veil alpha repair: stacking is the graph's whole point, so a non-paper
+ * gradient rect must stay a TRANSPARENT glaze — an authored 0.9 rect veil
+ * buries every stroke beneath it. Only the full-canvas paper layer may be
+ * opaque; everything else clamps to 0.45. */
+function veilAlphaRepair(s: Record<string, unknown>): Record<string, unknown> {
+  if (s?.type !== "gradient_fill" || isFullCanvasRect(s)) return s;
+  const a = Number(s.alpha);
+  if (Number.isFinite(a) && a > 0.45) return { ...s, alpha: 0.45 };
+  return s;
 }
 
 /* ------------------------ layer-order normalization ----------------------- */
@@ -297,6 +347,7 @@ interface CritiqueShape {
   type?: string;
   cx?: number; cy?: number; x?: number; y?: number; w?: number; h?: number;
   rBase?: number; rx?: number; ry?: number; fill?: string; alpha?: number;
+  colorTop?: string; colorBottom?: string; color?: string; lineWidth?: number;
   points?: number[][];
   shapes?: CritiqueShape[];
 }
@@ -344,6 +395,214 @@ export function critiqueGraph(
   };
   const fxs = heroShapes.map(centerX).filter(Number.isFinite);
   const fys = heroShapes.map(centerY).filter(Number.isFinite);
+
+  /* ---- visual-grammar rules (the failure modes that actually make a
+   * finished poster read as "no design sense") ---- */
+
+  // V1. empty type cells: rows of same-size letter boxes with no glyphs —
+  //     typography belongs to the shared overlay, boxes read as black bricks
+  for (const l of contentLayers) {
+    const rects = (l.shapes ?? []).filter((s) => s?.type === "round_rect") as any[];
+    if (rects.length < 3) continue;
+    const y0 = Number(rects[0]!.y), h0 = Math.max(1, Number(rects[0]!.h));
+    const aligned = rects.filter((r) =>
+      Math.abs(Number(r.y) - y0) < 30 &&
+      Math.abs(Number(r.h) - h0) < 14 &&
+      Number(r.w) / h0 > 0.4 && Number(r.w) / h0 < 1.8).length;
+    if (aligned >= 3) {
+      issues.push(
+        `layer "${l.id ?? "?"}" draws ${aligned} empty type cells (letter boxes with no glyphs) — the shared overlay paints the real title; delete these boxes or replace them with a drawn object`,
+      );
+      break;
+    }
+  }
+
+  // V2. invisible washes: fills within ΔRGB 14 of the paper tone render as
+  //     gray haze — wasted layers that only muddy the sheet
+  const PAPER = [245, 240, 230];
+  const hexDist = (hex: unknown, ref: number[]): number => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex ?? ""));
+    if (!m) return 255;
+    const n = parseInt(m[1]!, 16);
+    const c = [n >> 16 & 255, n >> 8 & 255, n & 255];
+    return Math.hypot(c[0]! - ref[0]!, c[1]! - ref[1]!, c[2]! - ref[2]!);
+  };
+  let ghostWashes = 0;
+  for (const l of layers) {
+    for (const s of l.shapes ?? []) {
+      if (s?.type === "gradient_fill" &&
+          hexDist(s.colorTop, PAPER) < 14 && hexDist(s.colorBottom, PAPER) < 14)
+        ghostWashes++;
+      else if ((s?.type === "organic_blob" || s?.type === "ellipse") &&
+          Number(s.alpha) <= 0.55 && hexDist(s.fill, PAPER) < 14)
+        ghostWashes++;
+    }
+  }
+  if (ghostWashes >= 2)
+    issues.push(
+      `${ghostWashes} washes/blobs are within ΔRGB 14 of the paper tone — they render as invisible haze; push each wash at least 12% in value from paper or delete the layer`,
+    );
+
+  // V3. competing horizons: several near-horizontal full-width strokes each
+  //     claim to be "the" ground/sky line and the perspective falls apart
+  const horizonYs: number[] = [];
+  for (const l of contentLayers) {
+    for (const s of l.shapes ?? []) {
+      if (s?.type !== "stroke_path" || !Array.isArray(s.points) || s.points.length < 2) continue;
+      const x0 = Number(s.points[0]?.[0]), y0 = Number(s.points[0]?.[1]);
+      const xe = Number(s.points[s.points.length - 1]?.[0]);
+      const ye = Number(s.points[s.points.length - 1]?.[1]);
+      if (![x0, y0, xe, ye].every(Number.isFinite)) continue;
+      if (Math.hypot(xe - x0, ye - y0) < 40) continue; // closed silhouette
+      const span = Math.abs(xe - x0);
+      if (span > 0.5 * 1200 && Math.abs(ye - y0) / span < 0.06) horizonYs.push((y0 + ye) / 2);
+    }
+  }
+  // a 900px-tall window holding 3+ of them = one band of the poster is
+  // ruled like notebook paper — that's the pathology, not scattered levels
+  let horizonStack = 0;
+  for (const y of horizonYs) {
+    const inBand = horizonYs.filter((v) => Math.abs(v - y) < 450).length;
+    horizonStack = Math.max(horizonStack, inBand);
+  }
+  if (horizonStack >= 3)
+    issues.push(
+      `${horizonYs.length} near-horizontal full-width strokes compete as horizons (${horizonStack} packed in one band) — keep ONE ground/sky line and give every other long line a clearly different angle`,
+    );
+
+  // V4. fat strokes: lineWidth past ~24 renders as a blurry sausage band
+  const fat = layers
+    .flatMap((l) => (l.shapes ?? []).map((s) => ({ l, s })))
+    .filter(({ s }) => s?.type === "stroke_path" && Number(s.lineWidth) > 26)
+    .sort((a, b) => Number(b.s.lineWidth) - Number(a.s.lineWidth))[0];
+  if (fat)
+    issues.push(
+      `stroke lineWidth ${fat.s.lineWidth}px in layer "${fat.l.id ?? "?"}" renders as a blurry band — model wide marks as filled shapes (round_rect/organic_blob); strokes stay ≤ 24px`,
+    );
+
+  // V5. stray stains: clusters of small unattached low-alpha blobs read as
+  //     mildew, not shadows — shading must anchor to an object, opposite lightDeg
+  let stains = 0;
+  for (const l of contentLayers) {
+    for (const s of l.shapes ?? []) {
+      if (s?.type === "organic_blob" && Number(s.rBase) < 130 &&
+          Number(s.alpha) < 0.35)
+        stains++;
+    }
+  }
+  if (stains >= 5)
+    issues.push(
+      `${stains} small low-alpha stain blobs are scattered with nothing anchoring them — attach each shadow to an object edge, on the side opposite lightDeg=${graph.lightDeg}`,
+    );
+
+  // V6. centered background mass: a huge disc on the center axis drags the
+  //     whole composition back to the dead-center default
+  const big = layers
+    .flatMap((l) => (l.shapes ?? []).map((s) => ({ l, s })))
+    .filter(({ s }) => s?.type === "organic_blob" && Number(s.rBase) >= 280)
+    .sort((a, b) => Number(b.s.rBase) - Number(a.s.rBase))[0];
+  if (big && Number.isFinite(Number(big.s.cx)) && Math.abs(Number(big.s.cx) - 600) < 100)
+    issues.push(
+      `the largest background mass (r=${big.s.rBase}px, layer "${big.l.id ?? "?"}") sits on the canvas center axis — slide it toward a third so the composition isn't symmetric mush`,
+    );
+
+  // V7. dangling line ends: open strokes that stop mid-air far from any
+  //     other shape read as rendering errors, not drawing
+  interface BBox { x0: number; y0: number; x1: number; y1: number; }
+  const allShapes = layers.flatMap((l) => l.shapes ?? []) as any[];
+  const bboxOf = (s: any): BBox | null => {
+    if (s?.type === "gradient_fill" || s?.type === "round_rect")
+      return { x0: Number(s.x) || 0, y0: Number(s.y) || 0,
+        x1: (Number(s.x) || 0) + Number(s.w ?? 0), y1: (Number(s.y) || 0) + Number(s.h ?? 0) };
+    if (s?.type === "organic_blob")
+      return { x0: Number(s.cx) - Number(s.rBase) * 1.3, y0: Number(s.cy) - Number(s.rBase) * 1.3,
+        x1: Number(s.cx) + Number(s.rBase) * 1.3, y1: Number(s.cy) + Number(s.rBase) * 1.3 };
+    if (s?.type === "ellipse")
+      return { x0: Number(s.cx) - Number(s.rx), y0: Number(s.cy) - Number(s.ry),
+        x1: Number(s.cx) + Number(s.rx), y1: Number(s.cy) + Number(s.ry) };
+    if (s?.type === "stroke_path" && Array.isArray(s.points) && s.points.length) {
+      const xs = s.points.map((p: number[]) => Number(p?.[0])).filter(Number.isFinite);
+      const ys = s.points.map((p: number[]) => Number(p?.[1])).filter(Number.isFinite);
+      if (!xs.length) return null;
+      return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+    }
+    return null;
+  };
+  const bboxes = allShapes.map(bboxOf).filter(Boolean) as BBox[];
+  let dangling = 0;
+  for (const s of allShapes) {
+    if (s?.type !== "stroke_path" || !Array.isArray(s.points) || s.points.length < 2) continue;
+    const own = bboxOf(s);
+    // nearest OTHER form (own bbox always contains the endpoints, so the
+    // self-distance is excluded — otherwise no line could ever dangle)
+    const others = bboxes.filter((b) => b !== own);
+    for (const [ex, ey] of [s.points[0]!, s.points[s.points.length - 1]!]) {
+      const x = Number(ex), y = Number(ey);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < 60 || x > 1140 || y < 60 || y > 1940) continue; // exits the frame
+      const nearest = Math.min(...others.map((b) =>
+        Math.max(b.x0 - x, 0, x - b.x1) ** 2 + Math.max(b.y0 - y, 0, y - b.y1) ** 2));
+      if (Math.sqrt(nearest) > 70) dangling++;
+    }
+  }
+  if (dangling >= 2)
+    issues.push(
+      `${dangling} stroke ends dangle mid-air far from any other form — run lines off the canvas edge or terminate them on another shape`,
+    );
+
+  // V8. opaque veil: a non-paper gradient rect above ~0.6 alpha is a blanket
+  //     that buries the layers beneath — stacking relies on transparency
+  const veil = layers
+    .flatMap((l) => (l.shapes ?? []).map((s) => ({ l, s })))
+    .filter(({ s }) => s?.type === "gradient_fill" &&
+      !isFullCanvasRect(s as Record<string, unknown>) &&
+      Number((s as Record<string, unknown>).alpha) > 0.6)
+    .sort((a, b) => Number(b.s.alpha) - Number(a.s.alpha))[0];
+  if (veil)
+    issues.push(
+      `gradient veil (alpha ${veil.s.alpha}) in layer "${veil.l.id ?? "?"}" is near-opaque and covers everything beneath — layers above paper are transparent glazes (alpha 0.08–0.35); build density from overlapping passes`,
+    );
+
+  // V9. subject inversion: the longest DARK line living outside every
+  //     object-construction layer. Contrast × scale is visual weight — a
+  //     full-canvas dark rail stroke outweighs a pale focal plate and the
+  //     floor becomes the subject. Strokes inside body layers are object
+  //     construction (even when that body layer sits below the topmost one),
+  //     and closed contours are object silhouettes — neither competes.
+  {
+    const PAPER2 = [245, 240, 230];
+    const strokeLen = (pts: number[][]): number => {
+      let len = 0;
+      for (let k = 1; k < pts.length; k++)
+        len += Math.hypot(Number(pts[k]?.[0]) - Number(pts[k - 1]?.[0]),
+                          Number(pts[k]?.[1]) - Number(pts[k - 1]?.[1]));
+      return len;
+    };
+    const isClosedStroke = (pts: number[][]): boolean => {
+      const a = pts[0]!, b = pts[pts.length - 1]!;
+      return Math.hypot(Number(a[0]) - Number(b[0]), Number(a[1]) - Number(b[1])) < 40;
+    };
+    // subject zone = the top body layers (hero depth and one below). A stray
+    // background plate (a ballast round_rect under the rails) must not grant
+    // its whole layer object-construction immunity
+    const subjectFloor = bodyLayers.length
+      ? Math.max(...bodyLayers.map(depthOf)) - 1
+      : Infinity;
+    const loud = layers
+      .flatMap((l) => (l.shapes ?? []).map((s) => ({ l, s })))
+      .filter(({ l, s }) =>
+        !(bodyLayers.includes(l) && depthOf(l) >= subjectFloor) &&
+        s?.type === "stroke_path" && Array.isArray(s.points) &&
+        !isClosedStroke(s.points) &&
+        Number(s.lineWidth) >= 3 &&
+        hexDist(s.color, PAPER2) / 441 >= 0.45 &&
+        strokeLen(s.points) >= 700)
+      .sort((a, b) => strokeLen((b.s as any).points) - strokeLen((a.s as any).points))[0];
+    if (loud)
+      issues.push(
+        `the longest dark line of the poster (${Math.round(strokeLen((loud.s as any).points))}px, ${String((loud.s as any).color)} in layer "${loud.l.id ?? "?"}") sits OUTSIDE the focal subject — ground-plane structure out-shouts the hero; mix that ink ~50% toward paper, thin it down, and let a nearer element interrupt it`,
+      );
+  }
 
   // 1. the poster needs a subject built from solid geometry
   if (!bodyLayers.length)
@@ -440,7 +699,7 @@ export function critiqueGraph(
           break;
         }
       }
-      if (issues.length >= 4) break;
+      if (issues.length >= 7) break;
     }
   }
 
@@ -466,7 +725,7 @@ export function critiqueGraph(
       );
   }
 
-  return issues.slice(0, 4);
+  return issues.slice(0, 7);
 }
 
 /* ------------------------ partial-graph scanning -------------------------- */

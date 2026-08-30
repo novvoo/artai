@@ -195,13 +195,20 @@ export function drawGradientFill(
   const y = sy * (Number(s.y) || 0);
   const w = sx * (Number(s.w) || 1200);
   const h = sy * (Number(s.h) || 2000);
+  // GLAZE semantics: a non-paper gradient rect is a transparent wash — a
+  // missing alpha defaults to 0.3 (never 0.9), and stale cached graphs that
+  // authored a near-opaque veil clamp to 0.45. Stacking must never bury the
+  // layers beneath; only the full-canvas paper may paint at alpha 1.
+  const fullCanvas = x <= 0 && y <= 0 && w >= W && h >= H;
+  let alpha = clamp(Number(s.alpha ?? 0.3), 0, 1);
+  if (!fullCanvas && alpha > 0.45) alpha = 0.45;
   const g = ctx.createLinearGradient(x, y, x, y + h);
-  g.addColorStop(0, hexToRgba(s.colorTop ?? "#f2ead8", clamp(Number(s.alpha ?? 0.9), 0, 1)));
-  g.addColorStop(1, hexToRgba(s.colorBottom ?? "#d9c9a8", clamp(Number(s.alpha ?? 0.9), 0, 1)));
+  g.addColorStop(0, hexToRgba(s.colorTop ?? "#f2ead8", alpha));
+  g.addColorStop(1, hexToRgba(s.colorBottom ?? "#d9c9a8", alpha));
   ctx.fillStyle = g;
   // paint ONLY the authored rectangle — the full-canvas fillRect this used
   // to do drowned every poster in one flat haze regardless of coordinates
-  if (x <= 0 && y <= 0 && w >= W && h >= H) {
+  if (fullCanvas) {
     ctx.fillRect(0, 0, W, H);
   } else {
     ctx.fillRect(x, y, w, h);
@@ -399,7 +406,10 @@ export function drawGrain(
   H: number,
   rnd: () => number,
 ): void {
-  const density = clamp(Number(s.density ?? 2600), 100, 20000);
+  // stale cached graphs may carry a 0–1 strength share where a speckle count
+  // belongs (0.45 would paint ZERO pixels) — remap onto the count scale
+  const rawD = Number(s.density ?? 2600);
+  const density = clamp(rawD < 10 ? 800 + rawD * 5200 : rawD, 100, 20000);
   const count = Math.round((density * W * H) / (1200 * 2000));
   const twoTone = s.twoTone !== false;
   for (let i = 0; i < count; i++) {

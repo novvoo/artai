@@ -36,10 +36,12 @@ function artGoodGraph() {
       { type: "gradient_fill", x: 80 + i * 70, y: 260 + i * 160, w: 520, h: 300,
         colorTop: "#cbc0dd", colorBottom: "#ddd4e8", alpha: 0.1 + i * 0.02 },
       { type: "organic_blob", cx: 280 + i * 100, cy: 480 + i * 130, rBase: 120,
-        harmonics: [0.06, 0.09], fill: "#cbc0dd", alpha: 0.14 + i * 0.02 },
+        harmonics: [0.06, 0.09], fill: "#cbc0dd", alpha: 0.38 + i * 0.03 },
       { type: "stroke_path", lineWidth: 1.5, color: "#26241f", pressureTaper: true,
+        // angled (not a horizon) and running OFF the right edge — must satisfy
+        // the horizon-stack and dangling-end art-director rules
         points: [[90 + i * 50, 420 + i * 150], [500 + i * 40, 470 + i * 150],
-                 [1000 - i * 30, 430 + i * 150]] },
+                 [1200, 530 + i * 150]] },
     ]});
   }
   layers.push(

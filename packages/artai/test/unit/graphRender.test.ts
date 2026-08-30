@@ -385,10 +385,12 @@ describe("critiqueGraph — art-director gate", () => {
         { type: "gradient_fill", x: 80 + i * 70, y: 260 + i * 160, w: 520, h: 300,
           colorTop: "#cbc0dd", colorBottom: "#ddd4e8", alpha: 0.1 + i * 0.02 },
         { type: "organic_blob", cx: 280 + i * 100, cy: 480 + i * 130, rBase: 120,
-          harmonics: [0.06, 0.09], fill: "#cbc0dd", alpha: 0.14 + i * 0.02 },
+          harmonics: [0.06, 0.09], fill: "#cbc0dd", alpha: 0.38 + i * 0.03 },
         { type: "stroke_path", lineWidth: 1.5, color: "#26241f", pressureTaper: true,
+          // visible angle change (rise 100 over ~900) and runs OFF the right
+          // edge — long lines must neither be horizontals nor dangle mid-air
           points: [[90 + i * 50, 420 + i * 150], [500 + i * 40, 470 + i * 150],
-                   [1000 - i * 30, 430 + i * 150]] },
+                   [1200, 530 + i * 150]] },
       ]});
     }
     layers.push(
@@ -433,5 +435,146 @@ describe("critiqueGraph — art-director gate", () => {
     const joined = issues.join(" | ");
     expect(joined).toMatch(/layers/);     // 4 < 10
     expect(joined).toMatch(/sparse/);     // shapes across layers too thin
+  });
+
+  /** regression fixture: the pathologies observed in a real "夏天开走了"
+   * composition that the old art-director rules all missed */
+  function pathologicalGraph() {
+    return {
+      lightDeg: 315,
+      layers: [
+        { id: "paper", label: "paper", depth: 0, shapes: [
+          { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
+            colorTop: "#F5F0E6", colorBottom: "#F0E7D6", alpha: 1 },
+        ]},
+        { id: "atm-far", label: "sky", depth: 1, shapes: [
+          // horizon line floating 1/6 down the canvas
+          { type: "stroke_path", points: [[190, 315], [520, 280], [1080, 290]],
+            color: "#E9DEC9", lineWidth: 1.5, pressureTaper: true },
+        ]},
+        { id: "depth-mass", label: "disc", depth: 2, shapes: [
+          // huge companion disc dead on the center axis
+          { type: "organic_blob", cx: 640, cy: 480, rBase: 350,
+            harmonics: [0.04, 0.07], fill: "#F4B893", alpha: 0.8 },
+        ]},
+        { id: "rails", label: "rails collage", depth: 6, shapes: [
+          // 30px sausage band + two more horizons stacked on one band
+          { type: "stroke_path", points: [[250, 1560], [479, 1200], [684, 878]],
+            color: "#E9A699", lineWidth: 30, pressureTaper: true },
+          { type: "stroke_path", points: [[95, 702], [1105, 703]],
+            color: "#C99F8A", lineWidth: 2.5, pressureTaper: true },
+          { type: "stroke_path", points: [[95, 861], [1105, 861]],
+            color: "#D3AC93", lineWidth: 2, pressureTaper: true },
+          // full-canvas dark rail outside the hero — subject inversion
+          { type: "stroke_path", points: [[268, 2010], [694, 864]],
+            color: "#913326", lineWidth: 4, pressureTaper: true },
+        ]},
+        { id: "headline", label: "typewriter cells", depth: 8, shapes: [
+          // five empty letter boxes — overlay owns typography
+          { type: "round_rect", x: 372, y: 690, w: 88, h: 90, r: 6, fill: "#26241F", alpha: 0.9 },
+          { type: "round_rect", x: 484, y: 690, w: 88, h: 90, r: 6, fill: "#26241F", alpha: 0.9 },
+          { type: "round_rect", x: 596, y: 690, w: 88, h: 90, r: 6, fill: "#26241F", alpha: 0.9 },
+          { type: "round_rect", x: 708, y: 690, w: 88, h: 90, r: 6, fill: "#26241F", alpha: 0.9 },
+          { type: "round_rect", x: 820, y: 690, w: 88, h: 90, r: 6, fill: "#26241F", alpha: 0.9 },
+        ]},
+        { id: "stains", label: "scattered shadows", depth: 9, shapes: [
+          // five unattached low-alpha smears reading as mildew
+          { type: "organic_blob", cx: 292, cy: 1096, rBase: 30, harmonics: [0.1], fill: "#913326", alpha: 0.3 },
+          { type: "organic_blob", cx: 312, cy: 1325, rBase: 48, harmonics: [0.1], fill: "#913326", alpha: 0.28 },
+          { type: "organic_blob", cx: 352, cy: 1330, rBase: 88, harmonics: [0.1], fill: "#913326", alpha: 0.2 },
+          { type: "organic_blob", cx: 205, cy: 1680, rBase: 125, harmonics: [0.1], fill: "#913326", alpha: 0.14 },
+          { type: "organic_blob", cx: 115, cy: 1880, rBase: 85, harmonics: [0.1], fill: "#913326", alpha: 0.16 },
+        ]},
+        { id: "finish", label: "finish", depth: 10, shapes: [
+          { type: "grain", density: 4800 },
+          { type: "vignette", intensity: 0.07 },
+        ]},
+      ],
+      paletteLocked: ["#D8412F", "#913326", "#E9A699", "#F5F0E6", "#F26A21"],
+    };
+  }
+
+  it("flags the observed pathologies: type cells, center disc, fat stroke, horizon stack, stains, loud rails", () => {
+    const joined = critiqueGraph(pathologicalGraph()).join(" | ");
+    expect(joined).toMatch(/empty type cells/);
+    expect(joined).toMatch(/center axis/);
+    expect(joined).toMatch(/blurry band/);
+    expect(joined).toMatch(/compete as horizons/);
+    expect(joined).toMatch(/stain blobs/);
+    expect(joined).toMatch(/OUTSIDE the focal subject/);
+  });
+
+  it("sanitize repairs 0–1 grain shares into speckle counts", () => {
+    const g = sanitizeCompositionGraph({
+      lightDeg: 315,
+      layers: [
+        { id: "paper", label: "paper", depth: 0, shapes: [
+          { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
+            colorTop: "#F5F0E6", colorBottom: "#F0E7D6", alpha: 1 },
+        ]},
+        { id: "finish", label: "finish", depth: 10, shapes: [
+          { type: "grain", density: 0.45 },   // would render ZERO pixels before
+          { type: "vignette", intensity: 0.07 },
+        ]},
+      ],
+      paletteLocked: ["#26241f", "#d8412f", "#e9e0cc"],
+    });
+    const grain = g.layers
+      .flatMap((l) => l.shapes)
+      .find((s) => s.type === "grain") as { density: number };
+    expect(grain.density).toBeGreaterThan(1000); // 0.45 → ~3140
+  });
+
+  it("keeps non-paper gradients transparent: clamps veil alpha, keeps paper opaque", () => {
+    const g = sanitizeCompositionGraph({
+      lightDeg: 315,
+      layers: [
+        { id: "paper", label: "paper", depth: 0, shapes: [
+          { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
+            colorTop: "#F5F0E6", colorBottom: "#F0E7D6", alpha: 1 },
+        ]},
+        { id: "veil", label: "heavy veil", depth: 2, shapes: [
+          { type: "gradient_fill", x: 100, y: 300, w: 800, h: 900,
+            colorTop: "#cbc0dd", colorBottom: "#ddd4e8", alpha: 0.85 },
+        ]},
+      ],
+      paletteLocked: ["#26241f", "#d8412f", "#e9e0cc"],
+    });
+    const paper = g.layers[0]!.shapes[0] as { alpha: number };
+    const veil = g.layers[1]!.shapes[0] as { alpha: number };
+    expect(paper.alpha).toBe(1);      // only the paper may be opaque
+    expect(veil.alpha).toBe(0.45);    // glaze clamp — stacking stays legible
+  });
+
+  it("flags a near-opaque veil through the art-director critique", () => {
+    const issues = critiqueGraph({
+      lightDeg: 315,
+      layers: [
+        { id: "paper", label: "paper", depth: 0, shapes: [
+          { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
+            colorTop: "#F5F0E6", colorBottom: "#F0E7D6", alpha: 1 },
+        ]},
+        { id: "veil", label: "blanket", depth: 3, shapes: [
+          { type: "gradient_fill", x: 60, y: 200, w: 1080, h: 1400,
+            colorTop: "#f2ead8", colorBottom: "#d9c9a8", alpha: 0.9 },
+        ]},
+        { id: "focal", label: "cup", depth: 8, shapes: [
+          { type: "ellipse", cx: 420, cy: 1050, rx: 95, ry: 115,
+            fill: "#cbc0dd", alpha: 0.55 },
+          { type: "stroke_path", lineWidth: 4, color: "#26241f",
+            points: [[325, 935], [318, 1050], [334, 1150], [420, 1172],
+                     [506, 1150], [522, 1050], [515, 937], [325, 935]] },
+          { type: "stroke_path", lineWidth: 2, color: "#26241f",
+            points: [[335, 1090], [420, 1110], [500, 1095], [335, 1090]] },
+          { type: "organic_blob", cx: 470, cy: 980, rBase: 46,
+            harmonics: [0.1, 0.12], fill: "#26241f", alpha: 0.3 },
+        ]},
+        { id: "finish", label: "finish", depth: 9, shapes: [
+          { type: "grain", density: 4800 },
+          { type: "vignette", intensity: 0.12 },
+        ]},
+      ],
+    });
+    expect(issues.join(" | ")).toMatch(/transparent glazes/);
   });
 });

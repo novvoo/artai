@@ -223,6 +223,10 @@ export function clearGenerationCache(): void {
     const k = localStorage.key(i);
     if (k?.startsWith("artai.gen.")) localStorage.removeItem(k);
   }
+  // the history panel is a DIRECTORY over these caches — an entry pointing at
+  // a wiped cache key can no longer restore, so the index goes with them
+  localStorage.removeItem(HISTORY_KEY);
+  engine.history = [];
 }
 export function cacheCount(): number {
   let n = 0;
@@ -302,10 +306,29 @@ export function loadHistory(): HistoryEntry[] {
   return stored;
 }
 
+/** persist the index; on quota pressure retry without thumbnails (the size
+ * bulk) and finally with fewer entries — a truncation beats a silent total
+ * loss of the newest records */
 function saveHistory(list: HistoryEntry[]): void {
+  const trimmed = list.slice(0, 60);
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 60)));
-  } catch { /* quota — history is best-effort */ }
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+    return;
+  } catch { /* fall through to degradation */ }
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(
+      trimmed.map(({ thumb: _t, ...rest }) => rest)));
+    return;
+  } catch { /* still too big — keep halving */ }
+  let half = trimmed;
+  while (half.length > 1) {
+    half = half.slice(0, Math.ceil(half.length / 2));
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(
+        half.map(({ thumb: _t, ...rest }) => rest)));
+      return;
+    } catch { /* keep halving */ }
+  }
 }
 
 /** downscale a poster dataUrl into a tiny jpeg thumbnail for the list */
@@ -412,9 +435,17 @@ class Engine {
     return "graph." + await genHash(this.theme.trim(), "graph:v1", scope);
   }
 
-  /** upsert a run into the history index after a successful poster render */
-  async recordHistory(): Promise<void> {
-    if (!this.graph || !this.envelope || !this.pngUrl) return;
+  /** upsert a run into the history index after a successful poster render.
+   * Returns false (and logs) instead of silently vanishing — a cache entry
+   * without its history record is exactly the bug users report. */
+  async recordHistory(): Promise<boolean> {
+    // prompt-backend runs legitimately produce no poster — stay quiet there;
+    // a render run without a final poster is the anomaly worth surfacing
+    if (this.backend === "prompt") return false;
+    if (!this.graph || !this.envelope || !this.pngUrl) {
+      this.pushLog("⚠ 未写入历史：本次运行没有可记录的最终海报（构图或渲染未完成）");
+      return false;
+    }
     const model = String(settings.model ?? "-");
     const theme = this.theme.trim();
     const graphKey = await this.graphCacheKey();
@@ -439,8 +470,14 @@ class Engine {
     const list = loadHistory().filter(
       (h) => !(h.key === entry.key && h.model === entry.model));
     list.unshift(entry);
-    saveHistory(list);
+    try {
+      saveHistory(list);
+    } catch (err) {
+      this.pushLog(`✗ 历史记录写入失败：${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
     this.history = list;
+    return true;
   }
 
   /** restore a cached run: theme + seed back into the panel, graph/poster
@@ -754,7 +791,8 @@ class Engine {
       if (!this.error && !signal.aborted) {
         this.stageIndex = 6; this.stageLabelZh = "done";
         this.pushLog(`✓ 完成，耗时 ${Math.round((Date.now() - t0) / 100) / 10}s`);
-        void this.recordHistory();
+        await this.recordHistory().catch((err) =>
+          this.pushLog(`✗ 历史记录写入失败：${err instanceof Error ? err.message : String(err)}`));
       }
     }
   }
@@ -841,7 +879,8 @@ class Engine {
       this.renderWarnings = r.warnings || [];
       this.chk();
       this.pushLog(`✓ 打磨完成：${graph.layers.length} 层 · ${graph.layers.reduce((a: number, l: any) => a + (l.shapes?.length ?? 0), 0)} shapes · 海报已更新`);
-      void this.recordHistory();
+      await this.recordHistory().catch((err) =>
+        this.pushLog(`✗ 历史记录写入失败：${err instanceof Error ? err.message : String(err)}`));
       // keep the composition cache coherent with the improved version
       if (useCache.on) {
         const key = await this.graphCacheKey();
@@ -937,6 +976,14 @@ function fmtErr(err: unknown): string {
 
 export const engine = new Engine();
 engine.history = loadHistory();
+
+// another tab wrote history/caches — refresh the panel so a run generated
+// elsewhere shows up without a manual reload
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === null || e.key === HISTORY_KEY) engine.history = loadHistory();
+  });
+}
 
 if (typeof queueMicrotask === "function") {
   queueMicrotask(() => { engine.webgl2 = typeof WebGL2RenderingContext !== 'undefined' && !!document.createElement('canvas').getContext('webgl2'); });

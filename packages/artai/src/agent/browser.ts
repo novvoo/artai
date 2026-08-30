@@ -82,6 +82,8 @@ interface AttemptOpts {
    * so gateways (GLM etc.) don't idle-timeout and reset long-generation
    * requests, which browsers report as an opaque "Failed to fetch" */
   readonly preferStream?: boolean | undefined;
+  /** called on every observed byte of progress — arms the stall watchdog */
+  readonly onActivity?: (() => void) | undefined;
 }
 interface RawReply {
   text: string;
@@ -131,6 +133,44 @@ export class BrowserIntentProvider implements IntentProvider {
    * gateways that answer `Access-Control-Allow-Origin: origin, *`. Absent
    * proxy support the retry fails fast and the decorated error surfaces.
    */
+  /**
+   * Stall watchdog — the "stuck at 构图初稿 forever" fix. A fetch whose
+   * headers never arrive, or an SSE stream the upstream stops feeding
+   * WITHOUT closing, otherwise hangs for eternity: fetch offers no timeout
+   * and reader.read() never rejects. The guard owns an internal controller
+   * aborted after `ms` without observed activity; every SSE chunk re-arms
+   * it via onActivity. The user's own stop signal always wins and is
+   * forwarded verbatim (its abort still surfaces as the normal user stop).
+   */
+  private stallGuard(
+    o: AttemptOpts, ms: number,
+  ): { signal: AbortSignal; activity: () => void; done: () => void } {
+    const ctrl = new AbortController();
+    const onUserAbort = (): void => ctrl.abort(o.signal?.reason);
+    if (o.signal) {
+      if (o.signal.aborted) onUserAbort();
+      else o.signal.addEventListener("abort", onUserAbort, { once: true });
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = (): void => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        ctrl.abort(Object.assign(
+          new Error(`upstream went silent — no data for ${Math.round(ms / 1000)}s`),
+          { name: "StallError" }));
+      }, ms);
+    };
+    arm();
+    return {
+      signal: ctrl.signal,
+      activity: arm,
+      done: (): void => {
+        if (timer) clearTimeout(timer);
+        o.signal?.removeEventListener("abort", onUserAbort);
+      },
+    };
+  }
+
   private async guardedFetch(url: string, init: RequestInit): Promise<Response> {
     const decorate = (msg: string): Error => Object.assign(
       new Error(/abort/i.test(msg)
@@ -192,12 +232,19 @@ export class BrowserIntentProvider implements IntentProvider {
 
       let lastBody = "";
       let netErr: string | null = null;
+      // streams re-arm the watchdog on every chunk (180s of silence = dead
+      // upstream); a non-stream body can't report progress, so its single
+      // arm is generous (10 min) — still bounded, unlike the previous forever
+      const streaming = Boolean(o.onDelta || o.preferStream);
+      const guardMs = streaming ? 180_000 : 600_000;
       for (let i = 0; i < bases.length; i++) {
+        const guard = this.stallGuard(o, guardMs);
+        try {
         let res: Response;
         try {
           res = await this.guardedFetch(`${bases[i]}/messages`, {
             method: "POST",
-            ...(o.signal ? { signal: o.signal } : {}),
+            signal: guard.signal,
             headers: {
               "content-type": "application/json",
               // pass BOTH x-api-key AND Authorization so Anthropic-native and
@@ -218,8 +265,9 @@ export class BrowserIntentProvider implements IntentProvider {
             }),
           });
         } catch (e) {
-          // network-level failure (offline / DNS / CORS) — remember it and
-          // still try the next base variant instead of abandoning raw()
+          // network-level failure (offline / DNS / CORS / stall watchdog) —
+          // remember it and still try the next base variant instead of
+          // abandoning raw()
           netErr = (e as Error).message;
           continue;
         }
@@ -232,7 +280,7 @@ export class BrowserIntentProvider implements IntentProvider {
         // the full text and surface deltas live. If the proxy ignored
         // stream:true it answers with plain JSON — fall through to that.
         if ((o.onDelta || o.preferStream) && (res.headers.get("content-type") ?? "").includes("event-stream")) {
-          const s = await this.consumeAnthropicSSE(res, o);
+          const s = await this.consumeAnthropicSSE(res, { ...o, onActivity: guard.activity });
           if (s.text.trim() || s.finish)
             return { ...s,
               text: o.prefill && !s.text.trimStart().startsWith("{")
@@ -299,6 +347,9 @@ export class BrowserIntentProvider implements IntentProvider {
             ? (d.usage ? `output_tokens=${d.usage.output_tokens ?? "?"}` : undefined)
             : `unrecognized body: ${lastBody.slice(0, 140)}`,
         };
+        } finally {
+          guard.done(); // covers fetch AND stream/json consumption
+        }
       }
       if (netErr)
         throw Object.assign(
@@ -306,52 +357,59 @@ export class BrowserIntentProvider implements IntentProvider {
           { name: "ProviderError" });
       throw Object.assign(new Error("anthropic transport exhausted"), { name: "ProviderError" });
     }
-    const res = await this.guardedFetch(`${this.cfg.baseUrl}/chat/completions`, {
-      method: "POST",
-      ...(o.signal ? { signal: o.signal } : {}),
-      headers: { "content-type": "application/json",
-                 authorization: `Bearer ${this.cfg.apiKey}` },
-      body: JSON.stringify({
-        model: this.cfg.model,
-        // budget === undefined ⇒ omit the field entirely (provider default)
-        ...(o.maxTokens ? { max_tokens: o.maxTokens } : {}),
-        ...(o.useRF ? { response_format: { type: "json_object" } } : {}),
-        ...((o.onDelta || o.preferStream) ? { stream: true } : {}),
-        messages: [{ role: "system", content: o.system }, { role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok)
-      throw Object.assign(new ProviderError(`${res.status} ${await txt(res)}`, res.status),
-                          { name: "ProviderError" });
+    const oaiStreaming = Boolean(o.onDelta || o.preferStream);
+    const guard = this.stallGuard(o, oaiStreaming ? 180_000 : 600_000);
+    let res: Response;
+    try {
+      res = await this.guardedFetch(`${this.cfg.baseUrl}/chat/completions`, {
+        method: "POST",
+        signal: guard.signal,
+        headers: { "content-type": "application/json",
+                   authorization: `Bearer ${this.cfg.apiKey}` },
+        body: JSON.stringify({
+          model: this.cfg.model,
+          // budget === undefined ⇒ omit the field entirely (provider default)
+          ...(o.maxTokens ? { max_tokens: o.maxTokens } : {}),
+          ...(o.useRF ? { response_format: { type: "json_object" } } : {}),
+          ...((o.onDelta || o.preferStream) ? { stream: true } : {}),
+          messages: [{ role: "system", content: o.system }, { role: "user", content: prompt }],
+        }),
+      });
+      if (!res.ok)
+        throw Object.assign(new ProviderError(`${res.status} ${await txt(res)}`, res.status),
+                            { name: "ProviderError" });
 
-    // streaming path (see anthropic branch); proxies that ignore stream:true
-    // answer with plain JSON and fall through to the standard parser below
-    if ((o.onDelta || o.preferStream) && (res.headers.get("content-type") ?? "").includes("event-stream")) {
-      return await this.consumeOpenAISSE(res, o);
+      // streaming path (see anthropic branch); proxies that ignore stream:true
+      // answer with plain JSON and fall through to the standard parser below
+      if (oaiStreaming && (res.headers.get("content-type") ?? "").includes("event-stream")) {
+        return await this.consumeOpenAISSE(res, { ...o, onActivity: guard.activity });
+      }
+
+      const d = (await res.json()) as {
+        choices?: Array<{
+          message?: { content?: string | null; reasoning?: string | null };
+          finish_reason?: string | null }>;
+        usage?: { completion_tokens?: number } | null;
+        error?: { message?: string };
+      };
+      if (d.error?.message)
+        throw Object.assign(new ProviderError(`upstream: ${d.error.message.slice(0, 160)}`, 200),
+                            { name: "ProviderError" });
+      const c0 = d.choices?.[0];
+      const text = c0?.message?.content || c0?.message?.reasoning || "";
+      // fool-proofing: an Anthropic gateway URL driven through the OpenAI wire
+      // always 404s at the gateway level — name the mismatch explicitly
+      const urlLooksAnthropic = /\/anthropic(\/|$)/.test(this.cfg.baseUrl.toLowerCase());
+      return { text,
+               finish: c0?.finish_reason ?? undefined,
+               usageNote: text
+                 ? (d.usage ? `completion_tokens=${d.usage.completion_tokens ?? "?"}` : undefined)
+                 : urlLooksAnthropic
+                   ? "wire mismatch: BASE URL is an Anthropic gateway but the preset uses /chat/completions — set WIRE FORMAT (or preset) to anthropic"
+                   : `unrecognized body: ${JSON.stringify(d).slice(0, 140)}` };
+    } finally {
+      guard.done();
     }
-
-    const d = (await res.json()) as {
-      choices?: Array<{
-        message?: { content?: string | null; reasoning?: string | null };
-        finish_reason?: string | null }>;
-      usage?: { completion_tokens?: number } | null;
-      error?: { message?: string };
-    };
-    if (d.error?.message)
-      throw Object.assign(new ProviderError(`upstream: ${d.error.message.slice(0, 160)}`, 200),
-                          { name: "ProviderError" });
-    const c0 = d.choices?.[0];
-    const text = c0?.message?.content || c0?.message?.reasoning || "";
-    // fool-proofing: an Anthropic gateway URL driven through the OpenAI wire
-    // always 404s at the gateway level — name the mismatch explicitly
-    const urlLooksAnthropic = /\/anthropic(\/|$)/.test(this.cfg.baseUrl.toLowerCase());
-    return { text,
-             finish: c0?.finish_reason ?? undefined,
-             usageNote: text
-               ? (d.usage ? `completion_tokens=${d.usage.completion_tokens ?? "?"}` : undefined)
-               : urlLooksAnthropic
-                 ? "wire mismatch: BASE URL is an Anthropic gateway but the preset uses /chat/completions — set WIRE FORMAT (or preset) to anthropic"
-                 : `unrecognized body: ${JSON.stringify(d).slice(0, 140)}` };
   }
 
   /** Anthropic /messages SSE: message content arrives as content_block_delta. */
@@ -365,6 +423,7 @@ export class BrowserIntentProvider implements IntentProvider {
       if (o.signal?.aborted) throw new DOMException("stopped by user", "AbortError");
       const { done, value } = await reader.read();
       if (done) break;
+      o.onActivity?.(); // bytes arrived — re-arm the stall watchdog
       buf += dec.decode(value, { stream: true });
       let nl: number;
       while ((nl = buf.indexOf("\n")) >= 0) {
@@ -413,6 +472,7 @@ export class BrowserIntentProvider implements IntentProvider {
       abortCheck();
       const { done, value } = await reader.read();
       if (done) break;
+      o.onActivity?.(); // bytes arrived — re-arm the stall watchdog
       buf += dec.decode(value, { stream: true });
       let nl: number;
       while ((nl = buf.indexOf("\n")) >= 0) {
@@ -770,7 +830,9 @@ export class BrowserIntentProvider implements IntentProvider {
         : rung === 0 ? "构图初稿…"
         : `构图重试（${/length|max.?token/i.test(lastErr)
             ? "输出截断，升级预算"
-            : /network failure|unreachable|Failed to fetch/i.test(lastErr)
+            : /went silent|StallError/i.test(lastErr)
+              ? "上游无响应（连接沉默），重试"
+              : /network failure|unreachable|Failed to fetch/i.test(lastErr)
               ? "传输失败，改走备用通道"
               : /art direction/i.test(lastErr)
                 ? "艺术总监批评"
