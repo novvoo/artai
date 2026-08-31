@@ -36,12 +36,16 @@ for (const f of fixtures) {
   const invisible = audit.invisible;
   console.log(
     `${f}: ${audit.reports.length} shapes audited, ` +
-    `${invisible.length} invisible`);
+    `${invisible.length} invisible, ${audit.buried.length} buried`);
   for (const r of invisible) {
     failed = true;
     console.log(
       `  ✗ ${r.layerId}#${r.shapeIndex} (${r.type}) deposited Δ${r.deposited} ` +
       `bbox=${JSON.stringify(r.bbox)}`);
+  }
+  for (const r of audit.buried) {
+    console.log(
+      `  ⚠ ${r.layerId}#${r.shapeIndex} (${r.type}) only ${Math.round((r.retained ?? 0) * 100)}% survives — buried by later layers`);
   }
 }
 await browser.close();

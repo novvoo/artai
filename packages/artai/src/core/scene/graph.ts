@@ -42,6 +42,11 @@ const StrokePathSchema = z.object({
   lineWidth: z.number().min(0.3),
   dashPattern: z.array(z.number()).optional(),
   pressureTaper: z.boolean().default(true),
+  /** explicit closed-silhouette flag — set it when the stroke is a closed
+   * outline; omitted ⇒ the endpoint-proximity heuristic decides */
+  closed: z.boolean().optional(),
+  /** fill strength of the closed-silhouette body (default 0.13 × alpha) */
+  fillAlpha: z.number().min(0).max(1).optional(),
 });
 
 /** body primitive for man-made objects — cups, books, doors, windows */
@@ -113,7 +118,7 @@ const SHAPES_VOCAB = `Each shape is one of:
 - {"type":"organic_blob","cx":n,"cy":n,"rBase":n,"harmonics":[n,n,n],"fill":"#hex","alpha":n}
 - {"type":"ellipse","cx":n,"cy":n,"rx":n,"ry":n,"rot"?:n,"fill":"#hex","alpha":n}  \u2014 cups, bowls, moons, any round body
 - {"type":"round_rect","x":n,"y":n,"w":n,"h":n,"r"?:n,"rot"?:n,"fill":"#hex","alpha":n}  \u2014 books, doors, tables, panels
-- {"type":"stroke_path","points":[[x,y],[x,y],\u2026],"color":"#hex","lineWidth":n,"dashPattern"?:[n,n],"pressureTaper":boolean}
+- {"type":"stroke_path","points":[[x,y],[x,y],\u2026],"color":"#hex","lineWidth":n,"dashPattern"?:[n,n],"pressureTaper":boolean,"closed"?:boolean,"fillAlpha"?:n}  \u2014 closed:true declares a silhouette outline (first point repeated last); fillAlpha 0.08\u20130.3 tunes its body fill
 - {"type":"vignette","intensity":n}
 - {"type":"grain","density":n}  \u2014 n counts speckles per 1200\u00d72000 canvas, use 800\u20134000 (NEVER a 0\u20131 fraction)`;
 
@@ -712,7 +717,7 @@ export function critiqueGraph(
           break;
         }
       }
-      if (issues.length >= 7) break;
+      if (issues.length >= 8) break;
     }
   }
 
@@ -766,7 +771,57 @@ export function critiqueGraph(
     }
   }
 
-  return issues.slice(0, 7);
+  // V13. palette discipline: paletteLocked is a CONTRACT, not decoration.
+  //      Tints/shades of palette entries are allowed (they stay near a
+  //      palette vertex); far-out colors mean the graph ignored the lock.
+  {
+    const palette = (graph as { paletteLocked?: string[] }).paletteLocked ?? [];
+    const rgbOf = (hex: string): [number, number, number] | null => {
+      const m = /^#?([0-9a-f]{6})$/i.exec(String(hex ?? "").trim());
+      if (!m) return null;
+      const n = parseInt(m[1]!, 16);
+      return [n >> 16 & 255, n >> 8 & 255, n & 255];
+    };
+    const pal = palette.map(rgbOf).filter(Boolean) as Array<[number, number, number]>;
+    if (pal.length) {
+      const colorOf = (s: any): string | undefined =>
+        s?.fill ?? s?.color ?? s?.colorTop ?? s?.colorBottom;
+      const far = new Map<string, number>();
+      for (const l of layers) {
+        for (const s of l.shapes ?? []) {
+          const hex = colorOf(s);
+          const rgb = hex ? rgbOf(hex) : null;
+          if (!rgb) continue;
+          const nearest = Math.min(...pal.map((p) =>
+            Math.hypot(p[0]! - rgb[0]!, p[1]! - rgb[1]!, p[2]! - rgb[2]!)));
+          if (nearest > 110)
+            far.set(String(hex).toLowerCase(), (far.get(String(hex).toLowerCase()) ?? 0) + 1);
+        }
+      }
+      const worst = [...far.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (worst)
+        issues.push(
+          `color ${worst[0]} (${worst[1]} use(s)) sits far outside paletteLocked [${palette.join(", ")}] — the lock is a contract: use a palette color or a tint/shade of one`,
+        );
+    }
+  }
+
+  // V14. depth ladder tears: normalizeLayerOrder renumbers depths evenly at
+  //      render time, so small gaps are cosmetic. A tear of ≥4 means the
+  //      author left a whole BAND unauthored (e.g. no midground at all).
+  {
+    const depths = contentLayers.map(depthOf).sort((a, b) => a - b);
+    let gapAt: [number, number] | null = null;
+    for (let k = 1; k < depths.length; k++) {
+      if (depths[k]! - depths[k - 1]! >= 4) { gapAt = [depths[k - 1]!, depths[k]!]; break; }
+    }
+    if (gapAt)
+      issues.push(
+        `depth tears from ${gapAt[0]} to ${gapAt[1]} — an entire band of the ladder is unauthored; add atmosphere/structure layers inside the gap`,
+      );
+  }
+
+  return issues.slice(0, 8);
 }
 
 /* ------------------------ partial-graph scanning -------------------------- */

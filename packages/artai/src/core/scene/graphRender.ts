@@ -151,12 +151,22 @@ export function traceBlobPath(
   ctx.closePath();
 }
 
+/** unit vector pointing TOWARD the light source for lightDeg — the one
+ * definition of the light angle shared by highlight offsets here and by the
+ * art-director's shade-side check. lightDeg used to be dead metadata: the
+ * highlight offsets were hardcoded upper-left regardless of its value. */
+export function lightVec(lightDeg: number | undefined): [number, number] {
+  const rad = ((Number(lightDeg) || 145) * Math.PI) / 180;
+  return [Math.cos(rad), Math.sin(rad)];
+}
+
 export function drawBlob(
   ctx: CanvasRenderingContext2D,
   s: any,
   rnd: () => number,
   sx: number,
   sy: number,
+  lightDeg?: number,
 ): void {
   const cx = sx * (Number(s.cx ?? 0));
   const cy = sy * (Number(s.cy ?? 0));
@@ -174,7 +184,10 @@ export function drawBlob(
   if (alpha > 0.25) {
     traceBlobPath(ctx, s, rnd, sx, sy);
     ctx.globalAlpha = 0.35 * alpha;
-    const core = ctx.createRadialGradient(cx - rBase * 0.15, cy - rBase * 0.1, 0, cx, cy, rBase * 0.55);
+    // pigment pools on the LIT side — direction comes from lightDeg
+    const [lx, ly] = lightVec(lightDeg);
+    const core = ctx.createRadialGradient(
+      cx + lx * rBase * 0.15, cy + ly * rBase * 0.15, 0, cx, cy, rBase * 0.55);
     core.addColorStop(0, hexToRgba(s.fill ?? "#4a463f", 1));
     core.addColorStop(1, hexToRgba(s.fill ?? "#4a463f", 0));
     ctx.fillStyle = core;
@@ -276,7 +289,9 @@ export function drawStrokePath(
     ctx.moveTo(S[0]!, S[1]!);
     for (let i = 1; i < m; i++) ctx.lineTo(S[i * 2]!, S[i * 2 + 1]!);
     ctx.closePath();
-    ctx.globalAlpha = baseAlpha * 0.13;
+    // fill strength: author-tunable via s.fillAlpha (0.13 default) — closed
+    // bodies previously had NO per-shape control over this
+    ctx.globalAlpha = baseAlpha * clamp(Number(s.fillAlpha ?? 0.13), 0, 1);
     ctx.fillStyle = ctx.strokeStyle;
     ctx.fill();
   }
@@ -341,6 +356,7 @@ export function drawEllipse(
   rnd: () => number,
   sx: number,
   sy: number,
+  lightDeg?: number,
 ): void {
   const cx = sx * Number(s.cx ?? 0);
   const cy = sy * Number(s.cy ?? 0);
@@ -360,8 +376,14 @@ export function drawEllipse(
   ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
   ctx.fill();
   if (alpha > 0.25) {
-    // inner pool of pigment, offset slightly toward the light-ish top-left
-    const core = ctx.createRadialGradient(-rx * 0.18, -ry * 0.14, 0, 0, 0, rMax * 0.55);
+    // inner pool of pigment on the LIT side (lightDeg-driven; note the pool
+    // offset is in the ROTATED frame — rotate the light vector back)
+    const rot = Number(s.rot) || 0;
+    const [lx, ly] = lightVec(lightDeg);
+    const ca = Math.cos(-rot), sa = Math.sin(-rot);
+    const core = ctx.createRadialGradient(
+      (lx * ca - ly * sa) * rx * 0.18, (lx * sa + ly * ca) * ry * 0.18,
+      0, 0, 0, rMax * 0.55);
     core.addColorStop(0, hexToRgba(s.fill ?? "#4a463f", 1));
     core.addColorStop(1, hexToRgba(s.fill ?? "#4a463f", 0));
     ctx.globalAlpha = 0.3 * alpha;
@@ -432,6 +454,16 @@ export function drawGrain(
 
 /* ------------------------------- main entry ------------------------------ */
 
+/** FNV-1a string hash — per-shape rng seeding */
+export function hashStr(str: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
 export function drawGraphToCtx(
   ctx: CanvasRenderingContext2D,
   graph: CompositionGraph,
@@ -443,7 +475,8 @@ export function drawGraphToCtx(
   const dh = opts?.designHeight ?? 2000;
   const sx = W / dw;
   const sy = H / dh;
-  const rnd = mulberry32((opts?.seed ?? 1) >>> 0);
+  const seed = (opts?.seed ?? 1) >>> 0;
+  const lightDeg = Number(graph.lightDeg);
 
   const layers = (graph.layers ?? [])
     .slice()
@@ -458,19 +491,25 @@ export function drawGraphToCtx(
   ctx.clip();
 
   for (const layer of layers) {
-    for (const shape of layer.shapes ?? []) {
+    const shapes = layer.shapes ?? [];
+    for (let si = 0; si < shapes.length; si++) {
+      const shape = shapes[si]!;
+      // PER-SHAPE rng stream seeded by (seed, layerId, shapeIndex) — a shared
+      // stream made every shape's wobble depend on how many shapes came
+      // before it: inserting/deleting one shape shifted ALL later shapes
+      const rnd = mulberry32(hashStr(`${seed}:${layer.id ?? ""}:${si}`));
       switch (shape.type) {
         case "gradient_fill":
           drawGradientFill(ctx, shape, W, H, sx, sy);
           break;
         case "organic_blob":
-          drawBlob(ctx, shape, rnd, sx, sy);
+          drawBlob(ctx, shape, rnd, sx, sy, lightDeg);
           break;
         case "stroke_path":
           drawStrokePath(ctx, shape, rnd, sx, sy);
           break;
         case "ellipse":
-          drawEllipse(ctx, shape, rnd, sx, sy);
+          drawEllipse(ctx, shape, rnd, sx, sy, lightDeg);
           break;
         case "round_rect":
           drawRoundRect(ctx, shape, W, H, sx, sy);
@@ -528,7 +567,7 @@ export function graphToScript(
   const fns: Function[] = [
     mulberry32, clamp, hexToRgba, sampleCatmullRom, traceBlobPath, drawBlob,
     drawGradientFill, drawStrokePath, drawEllipse, drawRoundRect,
-    drawVignette, drawGrain, drawGraphToCtx,
+    drawVignette, drawGrain, lightVec, hashStr, drawGraphToCtx,
   ];
   const body = fns.map((fn) => fn.toString()).join("\n\n");
 

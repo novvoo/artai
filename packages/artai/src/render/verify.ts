@@ -25,12 +25,19 @@ export interface DepositionReport {
   deposited: number;
   /** bbox in design space (1200×2000), null when the shape has no geometry */
   bbox: [number, number, number, number] | null;
+  /** share of the shape's deposit that SURVIVES to the final frame
+   * (0 = painted then completely buried, 1 = fully visible). Populated only
+   * for detail shapes; washes legitimately get occluded and are exempt. */
+  retained?: number;
 }
 
 export interface GraphAudit {
   reports: DepositionReport[];
   /** shapes whose deposit fell below INVISIBLE_THRESHOLD */
   invisible: DepositionReport[];
+  /** detail shapes whose deposit was later painted over — authored detail
+   * that is invisible in the FINAL composition (the occlusion blind spot) */
+  buried: DepositionReport[];
 }
 
 const AUDIT_W = 300;
@@ -68,6 +75,18 @@ export function shapeBBox(s: GraphShape | Record<string, unknown>):
   }
 }
 
+/** detail shapes whose burial is a defect (washes legitimately get occluded:
+ * they are atmosphere, not detail). Small solids + strokes count as detail. */
+function isDetailShape(s: Record<string, unknown>): boolean {
+  const a = Number(s.alpha ?? 1);
+  if (s.type === "stroke_path" && !s.dashPattern) return true;
+  if (s.type === "round_rect" || s.type === "ellipse")
+    return a >= 0.35 && Number(s.w ?? (2 * Number(s.rx))) < 0.25 * 1200;
+  if (s.type === "organic_blob")
+    return a >= 0.35 && Number(s.rBase) < 150;
+  return false;
+}
+
 export function verifyGraphDeposition(
   graph: CompositionGraph,
   seed = 1,
@@ -84,13 +103,19 @@ export function verifyGraphDeposition(
     ctx.getImageData(0, 0, AUDIT_W, AUDIT_H).data;
 
   const reports: DepositionReport[] = [];
+  // cropped before/post snapshots per detail shape — the burial check needs
+  // the shape's own contribution vs the FINAL frame over the same pixels
+  const pending: Array<{ report: DepositionReport; shape: Record<string, unknown>;
+    before: Uint8ClampedArray; post: Uint8ClampedArray;
+    x0: number; y0: number; x1: number; y1: number }> = [];
+
   const layers = [...(graph.layers ?? [])].sort(
     (a, b) => Number(a.depth ?? 0) - Number(b.depth ?? 0));
 
   for (const layer of layers) {
     const shapes = layer.shapes ?? [];
     for (let i = 0; i < shapes.length; i++) {
-      const s = shapes[i]!;
+      const s = shapes[i]! as Record<string, unknown>;
       const bbox = shapeBBox(s);
       if (!bbox) continue; // grain/vignette: full-canvas, always deposits
       const before = snap();
@@ -115,25 +140,62 @@ export function verifyGraphDeposition(
           n++;
         }
       }
-      reports.push({
+      const report: DepositionReport = {
         layerId: layer.id ?? "?",
         shapeIndex: i,
-        type: s.type,
+        type: s.type as string,
         deposited: n > 0 ? Math.round((sum / n) * 100) / 100 : 0,
         bbox,
-      });
+      };
+      reports.push(report);
+      if (isDetailShape(s)) {
+        const crop = (src: Uint8ClampedArray): Uint8ClampedArray => {
+          const out = new Uint8ClampedArray((y1 - y0) * (x1 - x0) * 4);
+          for (let y = y0; y < y1; y++)
+            out.set(src.subarray((y * AUDIT_W + x0) * 4, (y * AUDIT_W + x1) * 4),
+              ((y - y0) * (x1 - x0)) * 4);
+          return out;
+        };
+        pending.push({ report, shape: s, before: crop(before), post: crop(after),
+          x0, y0, x1, y1 });
+      }
     }
   }
 
+  // retention: how much of each detail shape's contribution survives to the
+  // FINAL frame — mean|final − before| / mean|post − before| over its bbox
+  const finalFrame = snap();
+  const buried: DepositionReport[] = [];
+  for (const p of pending) {
+    if (p.report.deposited < 3) continue; // nothing meaningful to bury
+    let fSum = 0, n = 0;
+    for (let y = p.y0; y < p.y1; y++) {
+      for (let x = p.x0; x < p.x1; x++) {
+        const k = (y * AUDIT_W + x) * 4;
+        fSum += (Math.abs(finalFrame[k]! - p.before[k]!) +
+                 Math.abs(finalFrame[k + 1]! - p.before[k + 1]!) +
+                 Math.abs(finalFrame[k + 2]! - p.before[k + 2]!)) / 3;
+        n++;
+      }
+    }
+    const retainedFinal = n > 0 ? fSum / n : 0;
+    const retained = Math.round(
+      Math.min(1, retainedFinal / Math.max(0.01, p.report.deposited)) * 100) / 100;
+    p.report.retained = retained;
+    if (retained < 0.25) buried.push(p.report);
+  }
+
   const invisible = reports.filter((r) => r.deposited < INVISIBLE_THRESHOLD);
-  return { reports, invisible };
+  return { reports, invisible, buried };
 }
 
 /** complaints phrased for the compose/patch loop — feed into polish() */
 export function depositionComplaints(audit: GraphAudit): string[] {
-  return audit.invisible.map((r) =>
+  const invisible = audit.invisible.map((r) =>
     `shape #${r.shapeIndex} (${r.type}) in layer "${r.layerId}" deposited NO visible pixels ` +
     `(mean Δ${r.deposited}) — it is dead weight: give it contrast (alpha ≥ 0.15, ink ≥ 12% from paper), ` +
-    `a real geometry (≥2 points, on-canvas), or delete it`,
-  );
+    `a real geometry (≥2 points, on-canvas), or delete it`);
+  const buried = audit.buried.map((r) =>
+    `shape #${r.shapeIndex} (${r.type}) in layer "${r.layerId}" is painted and then completely COVERED by later layers (only ${Math.round((r.retained ?? 0) * 100)}% survives) — the detail is invisible in the final composition: raise its depth above the occluder, move it to free space, or delete it`);
+  return [...invisible, ...buried];
 }
