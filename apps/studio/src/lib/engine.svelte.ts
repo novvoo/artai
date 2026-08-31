@@ -955,8 +955,20 @@ class Engine {
         await import("artai/core");
       const seedUsed = Number(env.meta?.seedUsed ?? 1);
       const complaints = critiqueGraph(this.graph as any);
+      // authored⇒deposited audit: shapes that painted NO visible pixels are
+      // invisible dead weight no JSON-level rule can see — measure the real
+      // render and turn misses into patch complaints
+      let deposition: string[] = [];
+      try {
+        const audit = artai.verifyGraphDeposition(this.graph as any,
+          Number(env.meta?.seedUsed ?? 1));
+        deposition = artai.depositionComplaints(audit);
+        if (audit.invisible.length)
+          this.pushLog(`⚠ 渲染审计：${audit.invisible.length} 个 shape 没有留下可见像素 — ${audit.invisible.map((r) => `${r.layerId}#${r.shapeIndex}(${r.type})`).join(", ")}`);
+      } catch { /* audit is best-effort — never block the polish loop */ }
+      const allComplaints = [...complaints, ...deposition];
       this.logOpen = true;
-      this.pushLog(`▶ 继续打磨 · 审计当前终稿：${complaints.length ? `${complaints.length} 项问题 — ${complaints.join("; ")}` : "无硬伤，执行提升级打磨"}${this.polishNote.trim() ? ` · 用户建议：「${this.polishNote.trim()}」` : ""}`);
+      this.pushLog(`▶ 继续打磨 · 审计当前终稿：${allComplaints.length ? `${allComplaints.length} 项问题 — ${allComplaints.join("; ")}` : "无硬伤，执行提升级打磨"}${this.polishNote.trim() ? ` · 用户建议：「${this.polishNote.trim()}」` : ""}`);
       const photo = this.photoBrief(env);
       const reserved = this.reservedPhotoBox(env);
       const graph = await bpInstance().composeGraph({
@@ -968,7 +980,7 @@ class Engine {
           graphJson: JSON.stringify({
             lightDeg: this.graph.lightDeg, layers: this.graph.layers,
           }),
-          complaints,
+          complaints: allComplaints,
         },
         ...(this.polishNote.trim()
           ? { userNote: this.polishNote.trim() }

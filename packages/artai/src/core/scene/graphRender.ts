@@ -223,7 +223,11 @@ export function drawStrokePath(
   sy: number,
 ): void {
   const pts = Array.isArray(s.points) ? s.points : [];
-  if (pts.length < 3) return;
+  // 2-point lines (a straight hand / pointer) are valid — a Catmull-Rom
+  // with 2 inputs degenerates to a straight segment between the endpoints,
+  // which is exactly what the author meant. The old `length < 3` rule was
+  // stealing things like clock hands, dashes, and tick marks.
+  if (pts.length < 2) return;
   const baseW = Math.max(0.3, Number(s.lineWidth ?? 2) || 2);
   const taper = s.pressureTaper !== false;
   const dash = Array.isArray(s.dashPattern) && s.dashPattern.length

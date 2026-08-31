@@ -11,6 +11,7 @@
 export { rasterizeCanvas } from "./raster-canvas.js";
 export { brushAvailable, rasterizeBrush } from "./raster-p5.js";
 export { registerAsset, getAsset, hasAsset, clearAssets } from "./assets.js";
+export { verifyGraphDeposition, depositionComplaints, shapeBBox, INVISIBLE_THRESHOLD, type GraphAudit, type DepositionReport } from "./verify.js";
 export { degradePhotoPixels, treatmentToDegrade } from "./photoTone.js";
 import { rasterizeCanvas } from "./raster-canvas.js";
 import { brushAvailable, rasterizeBrush } from "./raster-p5.js";

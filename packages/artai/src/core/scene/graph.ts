@@ -37,7 +37,7 @@ const BlobSchema = z.object({
 
 const StrokePathSchema = z.object({
   type: z.literal("stroke_path"),
-  points: z.array(z.array(z.number())).min(3),
+  points: z.array(z.array(z.number())).min(2),
   color: z.string(),
   lineWidth: z.number().min(0.3),
   dashPattern: z.array(z.number()).optional(),
@@ -562,6 +562,18 @@ export function critiqueGraph(
   if (veil)
     issues.push(
       `gradient veil (alpha ${veil.s.alpha}) in layer "${veil.l.id ?? "?"}" is near-opaque and covers everything beneath — layers above paper are transparent glazes (alpha 0.08–0.35); build density from overlapping passes`,
+    );
+
+  // V12. ghost wash: the opposite failure — alpha so low the shape paints
+  //      effectively nothing (the render audit calls these "no deposit")
+  const ghost = layers
+    .flatMap((l) => (l.shapes ?? []).map((s) => ({ l, s })))
+    .filter(({ s }) => s?.type !== "gradient_fill" && s?.type !== "grain" &&
+      s?.type !== "vignette" && Number(s?.alpha) > 0 && Number(s?.alpha) < 0.06)
+    .sort((a, b) => Number(a.s.alpha) - Number(b.s.alpha))[0];
+  if (ghost)
+    issues.push(
+      `shape (alpha ${ghost.s.alpha}) in layer "${ghost.l.id ?? "?"}" is too faint to register on the sheet — raise it to alpha ≥ 0.15 or delete it; invisible shapes still cost composition budget`,
     );
 
   // V9. subject inversion: the longest DARK line living outside every

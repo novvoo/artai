@@ -1,0 +1,749 @@
+{
+  "lightDeg": 180,
+  "layers": [
+    {
+      "id": "paper-base",
+      "label": "matte stock",
+      "depth": 0,
+      "shapes": [
+        {
+          "type": "gradient_fill",
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 2000,
+          "colorTop": "#F6F1E7",
+          "colorBottom": "#EFE7D6",
+          "alpha": 1
+        }
+      ]
+    },
+    {
+      "id": "sky-atmosphere",
+      "label": "upper air wash",
+      "depth": 1,
+      "shapes": [
+        {
+          "type": "gradient_fill",
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 820,
+          "colorTop": "#F5F0E6",
+          "colorBottom": "#D89E8E",
+          "alpha": 0.16
+        },
+        {
+          "type": "organic_blob",
+          "cx": 860,
+          "cy": 600,
+          "rBase": 180,
+          "harmonics": [
+            0.06,
+            0.09,
+            0.05
+          ],
+          "fill": "#6A4FC7",
+          "alpha": 0.1
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              120,
+              790
+            ],
+            [
+              1080,
+              790
+            ]
+          ],
+          "color": "#8E8782",
+          "lineWidth": 2.5,
+          "pressureTaper": true
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              180,
+              420
+            ],
+            [
+              540,
+              315
+            ]
+          ],
+          "color": "#D9CBB2",
+          "lineWidth": 1.5,
+          "pressureTaper": true
+        },
+        {
+          "type": "organic_blob",
+          "cx": 1130,
+          "cy": 90,
+          "rBase": 95,
+          "harmonics": [
+            0.18,
+            0.1,
+            0.14
+          ],
+          "fill": "#DDB08F",
+          "alpha": 0.3
+        }
+      ]
+    },
+    {
+      "id": "lower-atmosphere",
+      "label": "evening mottle",
+      "depth": 2,
+      "shapes": [
+        {
+          "type": "gradient_fill",
+          "x": 0,
+          "y": 760,
+          "w": 1200,
+          "h": 520,
+          "colorTop": "#D8A08E",
+          "colorBottom": "#F5F0E6",
+          "alpha": 0.12
+        },
+        {
+          "type": "organic_blob",
+          "cx": 260,
+          "cy": 640,
+          "rBase": 150,
+          "harmonics": [
+            0.12,
+            0.2,
+            0.08
+          ],
+          "fill": "#D89E8E",
+          "alpha": 0.22
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              140,
+              560
+            ],
+            [
+              520,
+              750
+            ]
+          ],
+          "color": "#9C938A",
+          "lineWidth": 2.5,
+          "pressureTaper": true
+        },
+        {
+          "type": "organic_blob",
+          "cx": 80,
+          "cy": 1920,
+          "rBase": 110,
+          "harmonics": [
+            0.2,
+            0.12,
+            0.16
+          ],
+          "fill": "#DDB08F",
+          "alpha": 0.28
+        },
+        {
+          "type": "ellipse",
+          "cx": 950,
+          "cy": 520,
+          "rx": 3,
+          "ry": 2,
+          "fill": "#C9B99C",
+          "alpha": 0.5
+        }
+      ]
+    },
+    {
+      "id": "track-floor",
+      "label": "converging rails",
+      "depth": 3,
+      "shapes": [
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              240,
+              1860
+            ],
+            [
+              585,
+              812
+            ]
+          ],
+          "color": "#8E8782",
+          "lineWidth": 4,
+          "pressureTaper": true
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              930,
+              1860
+            ],
+            [
+              615,
+              812
+            ]
+          ],
+          "color": "#8E8782",
+          "lineWidth": 4,
+          "pressureTaper": true
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              465,
+              1222
+            ],
+            [
+              720,
+              1216
+            ]
+          ],
+          "color": "#9C948A",
+          "lineWidth": 5,
+          "dashPattern": [
+            12,
+            16
+          ]
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              385,
+              1482
+            ],
+            [
+              795,
+              1474
+            ]
+          ],
+          "color": "#9C948A",
+          "lineWidth": 5,
+          "dashPattern": [
+            12,
+            16
+          ]
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              320,
+              1742
+            ],
+            [
+              860,
+              1734
+            ]
+          ],
+          "color": "#9C948A",
+          "lineWidth": 5,
+          "dashPattern": [
+            12,
+            16
+          ]
+        }
+      ]
+    },
+    {
+      "id": "platform-and-bench",
+      "label": "empty platform furniture",
+      "depth": 4,
+      "shapes": [
+        {
+          "type": "round_rect",
+          "x": 88,
+          "y": 1330,
+          "w": 402,
+          "h": 470,
+          "r": 10,
+          "rot": -5,
+          "fill": "#DCCBAC",
+          "alpha": 0.7
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              95,
+              1360
+            ],
+            [
+              350,
+              1072
+            ]
+          ],
+          "color": "#8E8782",
+          "lineWidth": 3,
+          "pressureTaper": true
+        },
+        {
+          "type": "round_rect",
+          "x": 862,
+          "y": 1240,
+          "w": 236,
+          "h": 26,
+          "r": 9,
+          "rot": -4,
+          "fill": "#913326",
+          "alpha": 0.55
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              902,
+              1270
+            ],
+            [
+              896,
+              1400
+            ],
+            [
+              1052,
+              1264
+            ],
+            [
+              1058,
+              1398
+            ]
+          ],
+          "color": "#913326",
+          "lineWidth": 6,
+          "pressureTaper": true
+        },
+        {
+          "type": "organic_blob",
+          "cx": 420,
+          "cy": 1600,
+          "rBase": 130,
+          "harmonics": [
+            0.08,
+            0.12,
+            0.06
+          ],
+          "fill": "#DDB08F",
+          "alpha": 0.35
+        }
+      ]
+    },
+    {
+      "id": "focal-panel",
+      "label": "light wash plate",
+      "depth": 5,
+      "shapes": [
+        {
+          "type": "gradient_fill",
+          "x": -60,
+          "y": 925,
+          "w": 1320,
+          "h": 310,
+          "colorTop": "#3A3831",
+          "colorBottom": "#3A3831",
+          "alpha": 0.08
+        },
+        {
+          "type": "gradient_fill",
+          "x": 40,
+          "y": 950,
+          "w": 1120,
+          "h": 260,
+          "colorTop": "#3A3831",
+          "colorBottom": "#3A3831",
+          "alpha": 0.14
+        },
+        {
+          "type": "gradient_fill",
+          "x": 160,
+          "y": 975,
+          "w": 880,
+          "h": 210,
+          "colorTop": "#3A3831",
+          "colorBottom": "#3A3831",
+          "alpha": 0.14
+        }
+      ]
+    },
+    {
+      "id": "platform-rails-motif",
+      "label": "watercolor-growth collage",
+      "depth": 6,
+      "shapes": [
+        {
+          "type": "organic_blob",
+          "cx": 600,
+          "cy": 1305,
+          "rBase": 72,
+          "harmonics": [
+            0.15,
+            0.09,
+            0.12
+          ],
+          "fill": "#D8412F",
+          "alpha": 0.6
+        },
+        {
+          "type": "organic_blob",
+          "cx": 645,
+          "cy": 1320,
+          "rBase": 58,
+          "harmonics": [
+            0.18,
+            0.1,
+            0.14
+          ],
+          "fill": "#82271C",
+          "alpha": 0.45
+        },
+        {
+          "type": "organic_blob",
+          "cx": 558,
+          "cy": 1288,
+          "rBase": 52,
+          "harmonics": [
+            0.16,
+            0.11
+          ],
+          "fill": "#EDC3B6",
+          "alpha": 0.5
+        },
+        {
+          "type": "organic_blob",
+          "cx": 588,
+          "cy": 1268,
+          "rBase": 28,
+          "harmonics": [
+            0.1,
+            0.08
+          ],
+          "fill": "#FAF4E8",
+          "alpha": 0.65
+        }
+      ]
+    },
+    {
+      "id": "station-clock",
+      "label": "late clock emblem",
+      "depth": 7,
+      "shapes": [
+        {
+          "type": "ellipse",
+          "cx": 620,
+          "cy": 1075,
+          "rx": 165,
+          "ry": 162,
+          "fill": "#F5F0E6",
+          "alpha": 0.88
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              620,
+              913
+            ],
+            [
+              715,
+              933
+            ],
+            [
+              775,
+              995
+            ],
+            [
+              785,
+              1075
+            ],
+            [
+              770,
+              1155
+            ],
+            [
+              710,
+              1212
+            ],
+            [
+              620,
+              1237
+            ],
+            [
+              530,
+              1212
+            ],
+            [
+              470,
+              1155
+            ],
+            [
+              455,
+              1075
+            ],
+            [
+              465,
+              995
+            ],
+            [
+              525,
+              933
+            ],
+            [
+              620,
+              913
+            ]
+          ],
+          "color": "#3A3831",
+          "lineWidth": 5,
+          "pressureTaper": true
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              620,
+              1075
+            ],
+            [
+              596,
+              955
+            ]
+          ],
+          "color": "#3A3831",
+          "lineWidth": 6,
+          "pressureTaper": true
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              620,
+              1075
+            ],
+            [
+              688,
+              1122
+            ]
+          ],
+          "color": "#3A3831",
+          "lineWidth": 7,
+          "pressureTaper": true
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              620,
+              1075
+            ],
+            [
+              578,
+              1158
+            ]
+          ],
+          "color": "#D8412F",
+          "lineWidth": 2.5,
+          "pressureTaper": true
+        },
+        {
+          "type": "organic_blob",
+          "cx": 705,
+          "cy": 1020,
+          "rBase": 85,
+          "harmonics": [
+            0.05,
+            0.08,
+            0.06
+          ],
+          "fill": "#913326",
+          "alpha": 0.2
+        },
+        {
+          "type": "organic_blob",
+          "cx": 668,
+          "cy": 1150,
+          "rBase": 65,
+          "harmonics": [
+            0.06,
+            0.09
+          ],
+          "fill": "#913326",
+          "alpha": 0.16
+        },
+        {
+          "type": "organic_blob",
+          "cx": 540,
+          "cy": 1000,
+          "rBase": 62,
+          "harmonics": [
+            0.06,
+            0.1
+          ],
+          "fill": "#FAF4E8",
+          "alpha": 0.55
+        }
+      ]
+    },
+    {
+      "id": "clock-ticks",
+      "label": "dial accents",
+      "depth": 8,
+      "shapes": [
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              620,
+              925
+            ],
+            [
+              620,
+              950
+            ]
+          ],
+          "color": "#3A3831",
+          "lineWidth": 4
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              620,
+              1225
+            ],
+            [
+              620,
+              1200
+            ]
+          ],
+          "color": "#3A3831",
+          "lineWidth": 4
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              470,
+              1075
+            ],
+            [
+              495,
+              1075
+            ]
+          ],
+          "color": "#3A3831",
+          "lineWidth": 4
+        },
+        {
+          "type": "stroke_path",
+          "points": [
+            [
+              770,
+              1075
+            ],
+            [
+              745,
+              1075
+            ]
+          ],
+          "color": "#3A3831",
+          "lineWidth": 4
+        },
+        {
+          "type": "ellipse",
+          "cx": 790,
+          "cy": 950,
+          "rx": 5,
+          "ry": 5,
+          "fill": "#6A4FC7",
+          "alpha": 0.5
+        }
+      ]
+    },
+    {
+      "id": "micro-marks",
+      "label": "archive chips",
+      "depth": 9,
+      "shapes": [
+        {
+          "type": "round_rect",
+          "x": 1020,
+          "y": 1800,
+          "w": 96,
+          "h": 96,
+          "r": 2,
+          "fill": "#6A4FC7",
+          "alpha": 0.12
+        },
+        {
+          "type": "ellipse",
+          "cx": 1046,
+          "cy": 1836,
+          "rx": 5,
+          "ry": 5,
+          "fill": "#913326",
+          "alpha": 0.55
+        },
+        {
+          "type": "ellipse",
+          "cx": 1072,
+          "cy": 1856,
+          "rx": 3.5,
+          "ry": 3.5,
+          "fill": "#913326",
+          "alpha": 0.45
+        },
+        {
+          "type": "ellipse",
+          "cx": 600,
+          "cy": 1846,
+          "rx": 4,
+          "ry": 4,
+          "fill": "#3A3831",
+          "alpha": 0.4
+        },
+        {
+          "type": "ellipse",
+          "cx": 624,
+          "cy": 1846,
+          "rx": 4,
+          "ry": 4,
+          "fill": "#3A3831",
+          "alpha": 0.4
+        }
+      ]
+    },
+    {
+      "id": "print-finisher",
+      "label": "scan grain and vignette",
+      "depth": 10,
+      "shapes": [
+        {
+          "type": "grain",
+          "density": 2400
+        },
+        {
+          "type": "vignette",
+          "intensity": 0.08
+        }
+      ]
+    }
+  ],
+  "paletteLocked": [
+    "#D8412F",
+    "#913326",
+    "#EDC3B6",
+    "#F5F0E6",
+    "#6A4FC7"
+  ]
+}

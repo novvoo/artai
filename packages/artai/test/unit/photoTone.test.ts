@@ -162,3 +162,79 @@ describe("critiqueGraph reserved photo box", () => {
     expect(issues.join(" | ")).toMatch(/reserved photo fragment rect/);
   });
 });
+
+describe("stroke_path 2-point line rendering", () => {
+  it("a 2-point stroke (clock hand) is rendered, not silently dropped", async () => {
+    const { sanitizeCompositionGraph } = await import("../../src/core/scene/graph.js");
+    const g = sanitizeCompositionGraph({
+      lightDeg: 315,
+      layers: [
+        { id: "paper", label: "paper", depth: 0, shapes: [
+          { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
+            colorTop: "#F5F0E6", colorBottom: "#EFE6D6", alpha: 1 },
+        ]},
+        { id: "hand", label: "minute hand", depth: 5, shapes: [
+          // exactly the case the old `length < 3` check used to drop
+          { type: "stroke_path", points: [[620, 1075], [688, 1122]],
+            color: "#3A3831", lineWidth: 6, pressureTaper: true },
+        ]},
+        { id: "finish", label: "finish", depth: 9, shapes: [
+          { type: "grain", density: 4800 },
+        ]},
+      ],
+      paletteLocked: ["#26241f", "#d8412f", "#e9e0cc"],
+    });
+    const hand = g.layers.find((l) => l.id === "hand")!.shapes[0] as
+      { type: string; points: number[][] };
+    expect(hand.type).toBe("stroke_path");
+    expect(hand.points.length).toBe(2); // schema now allows 2
+  });
+});
+
+describe("render deposition audit (authored⇒deposited)", () => {
+  it("shapeBBox covers every geometry-carrying shape type", async () => {
+    const { shapeBBox } = await import("../../src/render/verify.js");
+    expect(shapeBBox({ type: "round_rect", x: 10, y: 20, w: 100, h: 60 }))
+      .toEqual([10, 20, 110, 80]);
+    expect(shapeBBox({ type: "ellipse", cx: 0, cy: 0, rx: 30, ry: 40 }))
+      .toEqual([-30, -40, 30, 40]);
+    expect(shapeBBox({ type: "organic_blob", cx: 100, cy: 100, rBase: 50 }))
+      .toEqual([32.5, 32.5, 167.5, 167.5]); // 1.35× for harmonic displacement
+    expect(shapeBBox({ type: "stroke_path", points: [[100, 200], [300, 400]],
+      lineWidth: 4 })).toEqual([92, 192, 308, 408]); // ±8 pad
+    expect(shapeBBox({ type: "grain", density: 2400 })).toBeNull(); // full-canvas
+  });
+
+  it("V12 flags ghost washes (alpha < 0.06)", async () => {
+    const { critiqueGraph } = await import("../../src/core/scene/graph.js");
+    const issues = critiqueGraph({
+      lightDeg: 315,
+      layers: [
+        { id: "paper", label: "paper", depth: 0, shapes: [
+          { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
+            colorTop: "#F5F0E6", colorBottom: "#EFE6D6", alpha: 1 },
+        ]},
+        { id: "focal", label: "cup", depth: 8, shapes: [
+          { type: "ellipse", cx: 420, cy: 1050, rx: 95, ry: 115,
+            fill: "#cbc0dd", alpha: 0.55 },
+          { type: "stroke_path", lineWidth: 4, color: "#26241f",
+            points: [[325, 935], [318, 1050], [334, 1150], [420, 1172],
+                     [506, 1150], [522, 1050], [515, 937], [325, 935]] },
+          { type: "stroke_path", lineWidth: 2, color: "#26241f",
+            points: [[335, 1090], [420, 1110], [500, 1095], [335, 1090]] },
+          { type: "organic_blob", cx: 470, cy: 980, rBase: 46,
+            harmonics: [0.1, 0.12], fill: "#26241f", alpha: 0.3 },
+        ]},
+        { id: "ghost", label: "ghost plate", depth: 5, shapes: [
+          { type: "round_rect", x: 200, y: 600, w: 500, h: 700, r: 8,
+            fill: "#3A3831", alpha: 0.04 },
+        ]},
+        { id: "finish", label: "finish", depth: 9, shapes: [
+          { type: "grain", density: 4800 },
+          { type: "vignette", intensity: 0.12 },
+        ]},
+      ],
+    });
+    expect(issues.join(" | ")).toMatch(/too faint to register/);
+  });
+});
