@@ -353,6 +353,7 @@ interface CritiqueShape {
   cx?: number; cy?: number; x?: number; y?: number; w?: number; h?: number;
   rBase?: number; rx?: number; ry?: number; fill?: string; alpha?: number;
   colorTop?: string; colorBottom?: string; color?: string; lineWidth?: number;
+  closed?: boolean; fillAlpha?: number;
   points?: number[][];
   shapes?: CritiqueShape[];
 }
@@ -772,8 +773,10 @@ export function critiqueGraph(
   }
 
   // V13. palette discipline: paletteLocked is a CONTRACT, not decoration.
-  //      Tints/shades of palette entries are allowed (they stay near a
-  //      palette vertex); far-out colors mean the graph ignored the lock.
+  //      Legitimacy test = distance to the tint/shade SEGMENT [P -> paper]
+  //      and [P -> ink] for every palette entry P. A nearest-VERTEX test
+  //      misfires on mid-range tints: a 50% mix sits far from BOTH endpoints
+  //      while still being a legitimate blend of the two.
   {
     const palette = (graph as { paletteLocked?: string[] }).paletteLocked ?? [];
     const rgbOf = (hex: string): [number, number, number] | null => {
@@ -782,8 +785,22 @@ export function critiqueGraph(
       const n = parseInt(m[1]!, 16);
       return [n >> 16 & 255, n >> 8 & 255, n & 255];
     };
+    const PAPER_RGB: [number, number, number] = [245, 240, 230];
+    const INK_RGB: [number, number, number] = [28, 27, 24];
     const pal = palette.map(rgbOf).filter(Boolean) as Array<[number, number, number]>;
     if (pal.length) {
+      const segs: Array<[[number, number, number], [number, number, number]]> = [];
+      for (const p of pal) segs.push([p, PAPER_RGB], [p, INK_RGB]);
+      const distToSeg = (c: [number, number, number],
+        a: [number, number, number], b: [number, number, number]): number => {
+        const d = [b[0]! - a[0]!, b[1]! - a[1]!, b[2]! - a[2]!];
+        const v = [c[0]! - a[0]!, c[1]! - a[1]!, c[2]! - a[2]!];
+        const dd = d[0]! * d[0]! + d[1]! * d[1]! + d[2]! * d[2]!;
+        const t = Math.max(0, Math.min(1, dd > 0
+          ? (v[0]! * d[0]! + v[1]! * d[1]! + v[2]! * d[2]!) / dd : 0));
+        return Math.hypot(
+          v[0]! - d[0]! * t, v[1]! - d[1]! * t, v[2]! - d[2]! * t);
+      };
       const colorOf = (s: any): string | undefined =>
         s?.fill ?? s?.color ?? s?.colorTop ?? s?.colorBottom;
       const far = new Map<string, number>();
@@ -792,9 +809,8 @@ export function critiqueGraph(
           const hex = colorOf(s);
           const rgb = hex ? rgbOf(hex) : null;
           if (!rgb) continue;
-          const nearest = Math.min(...pal.map((p) =>
-            Math.hypot(p[0]! - rgb[0]!, p[1]! - rgb[1]!, p[2]! - rgb[2]!)));
-          if (nearest > 110)
+          const nearest = Math.min(...segs.map(([a, b]) => distToSeg(rgb, a, b)));
+          if (nearest > 34)
             far.set(String(hex).toLowerCase(), (far.get(String(hex).toLowerCase()) ?? 0) + 1);
         }
       }
@@ -818,6 +834,68 @@ export function critiqueGraph(
     if (gapAt)
       issues.push(
         `depth tears from ${gapAt[0]} to ${gapAt[1]} — an entire band of the ladder is unauthored; add atmosphere/structure layers inside the gap`,
+      );
+  }
+
+  // V15. value anchor: a poster whose every shape resolves to pale-mid
+  //      luminance reads as mush (measured on a real failure: full-sheet
+  //      luminance spread 0.07). Only FILLED masses can anchor — thin
+  //      strokes never cover enough area to hold the value structure.
+  {
+    const lumOf = (hex: string): number | null => {
+      const m = /^#?([0-9a-f]{6})$/i.exec(String(hex ?? "").trim());
+      if (!m) return null;
+      const lin = (v: number): number => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      };
+      const n = parseInt(m[1]!, 16);
+      return 0.2126 * lin(n >> 16 & 255) + 0.7152 * lin(n >> 8 & 255) +
+             0.0722 * lin(n & 255);
+    };
+    const PAPER_LUM = 0.874; // #F5F0E6
+    const CANVAS = 1200 * 2000;
+    let anchorArea = 0;
+    for (const l of layers) {
+      for (const s of l.shapes ?? []) {
+        if (s?.type === "gradient_fill" || s?.type === "grain" ||
+            s?.type === "vignette") continue;
+        const hex = String(s?.fill ?? s?.color ?? "");
+        const lc = lumOf(hex);
+        if (lc === null) continue;
+        // closed stroke bodies deposit at fillAlpha × stroke alpha — the
+        // stroke's own alpha wildly overstates the body's darkness (a
+        // lw-3 outline at 0.92 is NOT a dark mass; its 0.13 body is)
+        const isClosedBody = s.type === "stroke_path" && s.closed;
+        const a = isClosedBody
+          ? Number(s.alpha ?? 0.92) * Number(s.fillAlpha ?? 0.13)
+          : Number(s.alpha ?? (s.type === "stroke_path" ? 0.92 : 0.5));
+        const eff = a * lc + (1 - a) * PAPER_LUM;
+        if (eff > 0.5) continue; // not a dark mass once diluted onto paper
+        let area = 0;
+        if (s.type === "round_rect")
+          area = Number(s.w) * Number(s.h);
+        else if (s.type === "ellipse")
+          area = Math.PI * Number(s.rx) * Number(s.ry);
+        else if (s.type === "organic_blob")
+          area = Math.PI * Number(s.rBase) * Number(s.rBase);
+        else if (isClosedBody && Array.isArray(s.points)) {
+          // closed body fill: ellipse-ish area of the bbox (the fill alpha
+          // is already folded into `a` — do NOT discount the area again)
+          const xs = s.points.map((pt: number[]) => Number(pt?.[0])).filter(Number.isFinite);
+          const ys = s.points.map((pt: number[]) => Number(pt?.[1])).filter(Number.isFinite);
+          if (xs.length >= 3)
+            area = (Math.max(...xs) - Math.min(...xs)) *
+                   (Math.max(...ys) - Math.min(...ys)) * 0.7;
+        }
+        anchorArea += Math.min(area, 0.05 * CANVAS);
+        if (anchorArea >= 0.0015 * CANVAS) break;
+      }
+      if (anchorArea >= 0.0015 * CANVAS) break;
+    }
+    if (anchorArea < 0.0015 * CANVAS)
+      issues.push(
+        "no dark anchor — every shape resolves to pale-mid luminance, so the sheet reads as washed-out mush; add ONE committed dark mass at the focal (solid fill, effective luminance ≤ 0.5, ≥ 0.15% of the canvas)",
       );
   }
 

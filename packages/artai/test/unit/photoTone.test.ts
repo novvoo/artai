@@ -238,3 +238,45 @@ describe("render deposition audit (authored⇒deposited)", () => {
     expect(issues.join(" | ")).toMatch(/too faint to register/);
   });
 });
+
+describe("V15 dark anchor + V13 tint/shade palette", () => {
+  it("flags the real washed-out graph (tide mark fixture, spread 0.08)", async () => {
+    const { critiqueGraph } = await import("../../src/core/scene/graph.js");
+    const { readFileSync } = await import("node:fs");
+    const g = JSON.parse(readFileSync(
+      new URL("../../test/fixtures/tide-mark-graph.json", import.meta.url), "utf8"));
+    const issues = critiqueGraph(g).join(" | ");
+    expect(issues).toMatch(/no dark anchor/);
+    // V13 must NOT flag #CFD79F — it is a legitimate tint of #9BB53C
+    expect(issues).not.toMatch(/sits far outside paletteLocked/);
+  });
+
+  it("passes a graph whose focal carries a committed dark mass", async () => {
+    const { critiqueGraph } = await import("../../src/core/scene/graph.js");
+    const issues = critiqueGraph({
+      lightDeg: 315,
+      layers: [
+        { id: "paper", label: "paper", depth: 0, shapes: [
+          { type: "gradient_fill", x: 0, y: 0, w: 1200, h: 2000,
+            colorTop: "#F5F0E6", colorBottom: "#EFE6D6", alpha: 1 },
+        ]},
+        { id: "focal", label: "cup", depth: 8, shapes: [
+          { type: "ellipse", cx: 420, cy: 1050, rx: 95, ry: 115,
+            fill: "#cbc0dd", alpha: 0.55 },
+          { type: "stroke_path", lineWidth: 4, color: "#26241f",
+            points: [[325, 935], [318, 1050], [334, 1150], [420, 1172],
+                     [506, 1150], [522, 1050], [515, 937], [325, 935]] },
+          { type: "stroke_path", lineWidth: 2, color: "#26241f",
+            points: [[335, 1090], [420, 1110], [500, 1095], [335, 1090]] },
+          { type: "organic_blob", cx: 470, cy: 980, rBase: 46,
+            harmonics: [0.1, 0.12], fill: "#26241f", alpha: 0.75 },
+        ]},
+        { id: "finish", label: "finish", depth: 9, shapes: [
+          { type: "grain", density: 4800 },
+          { type: "vignette", intensity: 0.12 },
+        ]},
+      ],
+    });
+    expect(issues.join(" | ")).not.toMatch(/no dark anchor/);
+  });
+});

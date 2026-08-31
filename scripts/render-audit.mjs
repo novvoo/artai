@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const url = process.argv[2] ?? "http://localhost:5173";
 
-const fixtures = ["station-clock-graph.json"];
+const fixtures = ["station-clock-graph.json", "tide-mark-graph.json"];
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -36,7 +36,8 @@ for (const f of fixtures) {
   const invisible = audit.invisible;
   console.log(
     `${f}: ${audit.reports.length} shapes audited, ` +
-    `${invisible.length} invisible, ${audit.buried.length} buried`);
+    `${invisible.length} invisible, ${audit.buried.length} buried, ` +
+    `contrast ${audit.contrast}`);
   for (const r of invisible) {
     failed = true;
     console.log(

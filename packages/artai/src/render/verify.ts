@@ -38,6 +38,10 @@ export interface GraphAudit {
   /** detail shapes whose deposit was later painted over — authored detail
    * that is invisible in the FINAL composition (the occlusion blind spot) */
   buried: DepositionReport[];
+  /** luminance spread (p90 − p10) of the FINAL small render, 0–1.
+   * < 0.18 means the value structure collapsed into pale mush even though
+   * every shape "deposited" — alpha stacking diluted everything. */
+  contrast: number;
 }
 
 const AUDIT_W = 300;
@@ -186,7 +190,18 @@ export function verifyGraphDeposition(
   }
 
   const invisible = reports.filter((r) => r.deposited < INVISIBLE_THRESHOLD);
-  return { reports, invisible, buried };
+
+  // value-structure check on the final frame: p90 − p10 luminance spread
+  const lums: number[] = [];
+  for (let i = 0; i < finalFrame.length; i += 4)
+    lums.push((0.2126 * finalFrame[i]! + 0.7152 * finalFrame[i + 1]! +
+               0.0722 * finalFrame[i + 2]!) / 255);
+  lums.sort((a, b) => a - b);
+  const p10 = lums[Math.floor(lums.length * 0.1)] ?? 0;
+  const p90 = lums[Math.floor(lums.length * 0.9)] ?? 1;
+  const contrast = Math.round(Math.max(0, p90 - p10) * 100) / 100;
+
+  return { reports, invisible, buried, contrast };
 }
 
 /** complaints phrased for the compose/patch loop — feed into polish() */
@@ -197,5 +212,8 @@ export function depositionComplaints(audit: GraphAudit): string[] {
     `a real geometry (≥2 points, on-canvas), or delete it`);
   const buried = audit.buried.map((r) =>
     `shape #${r.shapeIndex} (${r.type}) in layer "${r.layerId}" is painted and then completely COVERED by later layers (only ${Math.round((r.retained ?? 0) * 100)}% survives) — the detail is invisible in the final composition: raise its depth above the occluder, move it to free space, or delete it`);
-  return [...invisible, ...buried];
+  const contrast = audit.contrast < 0.18
+    ? [`final render luminance spread is only ${audit.contrast} — the value structure collapsed into pale mush (alpha stacking diluted every mass); commit ONE dark ink fill at the focal (alpha ≥ 0.5) and keep the paper clean`]
+    : [];
+  return [...invisible, ...buried, ...contrast];
 }

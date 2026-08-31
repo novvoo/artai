@@ -60,7 +60,7 @@ function artGoodGraph() {
         points: [[375, 935], [368, 1050], [384, 1150], [470, 1172],
                  [556, 1150], [572, 1050], [565, 937], [375, 935]] },
       { type: "organic_blob", cx: 520, cy: 980, rBase: 46,
-        harmonics: [0.1, 0.12], fill: "#26241f", alpha: 0.3 },
+        harmonics: [0.1, 0.12], fill: "#26241f", alpha: 0.75 },
       { type: "stroke_path", lineWidth: 2, color: "#26241f",
         points: [[390, 1090], [470, 1108], [548, 1094], [390, 1090]] },
     ]},
@@ -223,7 +223,7 @@ describe("composeGraph quality-revision loop", () => {
         '{"id":"focal","label":"cup","depth":8,"shapes":[' +
         '{"type":"ellipse","cx":470,"cy":1050,"rx":95,"ry":115,"fill":"#cbc0dd","alpha":0.55},' +
         '{"type":"stroke_path","lineWidth":4,"color":"#26241f","points":[[375,935],[368,1050],[384,1150],[470,1172],[556,1150],[572,1050],[565,937],[375,935]]},' +
-        '{"type":"organic_blob","cx":520,"cy":980,"rBase":46,"harmonics":[0.1,0.12],"fill":"#26241f","alpha":0.3},' +
+        '{"type":"organic_blob","cx":520,"cy":980,"rBase":46,"harmonics":[0.1,0.12],"fill":"#26241f","alpha":0.75},' +
         '{"type":"stroke_path","lineWidth":2,"color":"#26241f","points":[[390,1090],[470,1108],[548,1094],[390,1090]]}]}',
       ].join("\n");
       return Promise.resolve(new Response(JSON.stringify({

@@ -255,9 +255,13 @@ export function drawStrokePath(
   }
   const n = X.length;
   const total0 = Math.hypot(X[n - 1]! - X[0]!, Y[n - 1]! - Y[0]!);
-  // authored first point repeated at the end ⇒ a closed silhouette contour;
-  // the smooth body fill keeps such shapes from reading as wireframes
-  const closed = total0 < Math.max(6, baseW * 2.5);
+  // closed silhouette: the AUTHOR may declare it explicitly (s.closed);
+  // otherwise the endpoint-proximity heuristic guesses (first point repeated
+  // at the end). The heuristic alone misfiled open curves that happen to end
+  // near their start — and it silently ignored the documented field.
+  const closed = typeof s.closed === "boolean"
+    ? s.closed
+    : total0 < Math.max(6, baseW * 2.5);
   const S = sampleCatmullRom(X, Y, closed, 14);
   const m = S.length / 2;
   if (m < 2) return;

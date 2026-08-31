@@ -411,7 +411,7 @@ describe("critiqueGraph — art-director gate", () => {
         { type: "stroke_path", lineWidth: 2, color: "#26241f",
           points: [[335, 1090], [420, 1110], [500, 1095], [335, 1090]] },
         { type: "organic_blob", cx: 470, cy: 980, rBase: 46,
-          harmonics: [0.1, 0.12], fill: "#26241f", alpha: 0.3 },
+          harmonics: [0.1, 0.12], fill: "#26241f", alpha: 0.75 },
       ]},
       { id: "finish", label: "finish", depth: 9, shapes: [
         { type: "grain", density: 4800 },

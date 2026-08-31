@@ -960,7 +960,7 @@ export class BrowserIntentProvider implements IntentProvider {
         // Complaints seed the next attempt's revision; if the attempt budget
         // runs out, the fewest-complaints version wins — a flawed graph is
         // still better than the RAW baseline fallback.
-        const complaints = critiqueGraph(graph, input.reservedBox
+        const complaints = critiqueGraph(graph as never, input.reservedBox
           ? { reservedBoxes: [{ x0: input.reservedBox[0], y0: input.reservedBox[1],
                                 x1: input.reservedBox[0] + input.reservedBox[2],
                                 y1: input.reservedBox[1] + input.reservedBox[3] }] }
